@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title id="docTitle">Control de Cirugías — Clínica</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./css/styles.css">
+</head>
+<body>
+
+<!-- ── LOGIN ─────────────────────────────────────────────────────────── -->
+<div id="loginScreen">
+  <div class="login-card">
+    <div class="login-brand" id="loginBrand">Clínica</div>
+    <div class="login-sub" id="loginSystemName">Control de Cirugías</div>
+    <div class="login-error" id="loginError"></div>
+    <form class="login-form" id="loginForm" action="#" method="dialog" novalidate onsubmit="return false;">
+      <div>
+        <label for="loginEmail">Correo electrónico</label>
+        <input id="loginEmail" type="email" autocomplete="username" placeholder="usuario@correo.com">
+      </div>
+      <div>
+        <label for="loginPass">Contraseña</label>
+        <input id="loginPass" type="password" autocomplete="current-password" placeholder="••••••••">
+      </div>
+      <button class="btn primary" id="loginBtn" type="button">Ingresar</button>
+    </form>
+    <div class="login-help">Solo ingresan usuarios creados por el administrador.</div>
+  </div>
+</div>
+
+<!-- ── APP ───────────────────────────────────────────────────────────── -->
+<div id="appContent">
+
+  <div class="topbar">
+    <div class="app-shell">
+
+      <!-- HEADER -->
+      <header>
+        <div class="brandbar brandbar-main">
+          <div class="brand-left">
+            <div class="logo"><span id="brandClinicaNombre">Clínica</span> <small id="brandSistemaNombre">Operación diaria clínica</small></div>
+          </div>
+          <div class="brand-center">
+            <input type="text" id="q" placeholder="🔍 Buscar paciente, DNI o afiliado...">
+          </div>
+          <div class="brand-right">
+            <button class="btn primary" id="btnNuevo">+ Nuevo paciente</button>
+            <button class="btn" id="btnSync" title="Recargar datos del servidor">↺ Sync</button>
+            <span id="syncBadge"></span>
+            <span id="connectorBadge" class="connector-badge off" title="Clic para probar conexión" style="cursor:pointer">⚫ Conector</span>
+            <div id="authMeta">
+              <span id="authUserBadge"></span>
+              <span id="authRoleBadge"></span>
+              <button class="btn" id="logoutBtn" style="display:none">Salir</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="workspace-console">
+          <div class="tabrow-wrap workspace-panel workspace-nav-panel"><div class="tabrow-label">Módulos</div><div class="tabrow" id="tabrow">
+            <button class="tablink active" data-tab="tabla">Operación</button>
+            <button class="tablink" data-tab="pedirlente">Circuito de lentes</button>
+            <button class="tablink" data-tab="kanban">Tableros</button>
+            <button class="tablink" data-tab="whatsapp">WhatsApp</button>
+            <button class="tablink" data-tab="facturar">Facturar</button>
+            <button class="tablink" data-tab="estadisticas">Indicadores</button>
+            <button class="tablink" data-tab="administracion">Administración</button></div></div>
+
+          <div class="workspace-panel queue-panel">
+            <div class="panel-topline">
+              <div>
+                <div class="panel-title">Cola principal de operación</div>
+                <div class="panel-sub">Usá una sola cola de trabajo y resolvé paciente por paciente.</div>
+              </div>
+              <div class="alerts-inline">
+                <button class="alerts-toggle" id="alertsToggle">🚨 Críticas: <span id="alertsCriticalCount">0</span></button>
+              </div>
+            </div>
+            <div class="quick-filters" id="quickFilters"></div>
+          </div>
+
+          <div class="workspace-panel filterbar filterbar-refine">
+            <div class="refine-primary">
+              <select id="fCli">
+                <option value="">Todas las clínicas</option>
+                <option>CDU</option>
+                <option>Gualeguaychú</option>
+              </select>
+              <select id="fOS">
+                <option value="">Todas las obras sociales</option>
+                <option>PAMI</option>
+                <option>OSER</option>
+                <option>PARTICULAR</option>
+              </select>
+              <select id="fEst" hidden>
+                <option value="">Todos los estados</option>
+              </select>
+              <button class="btn" id="btnLimpiarFiltros">Limpiar refinamientos</button>
+            </div>
+            <div class="refine-secondary">
+              <details class="advanced-filters">
+                <summary class="btn">Filtros avanzados</summary>
+                <div class="advanced-filters-body">
+                  <div class="advanced-help">Usá estos filtros solo cuando quieras afinar la operación diaria. En Tableros se limpian automáticamente para entrar sin arrastre.</div>
+                  <label class="filter-label">Fecha programada
+                    <input type="date" id="fFechaCir" style="margin-left:6px">
+                  </label>
+                  <label class="filter-label"><input type="checkbox" id="showSilenced"> Mostrar silenciadas</label>
+                  <label class="filter-label"><input type="checkbox" id="hideFinalizadasSinAccion"> Ocultar finalizadas sin acción</label>
+                  <button class="btn" id="btnConfigAlertas" style="padding:5px 10px">⚙ Configurar alertas</button>
+                </div>
+              </details>
+              <details class="more-menu" id="moreMenu">
+                <summary class="btn">Herramientas ▾</summary>
+                <div class="more-menu-list">
+                  <button class="btn" id="btnConfigurarURL" title="Configurar URL del servidor">⚙ Configurar conector</button>
+                  <button class="btn green" id="btnExportarListos">↓ Descargar Excel listos</button>
+                  <button class="btn" id="btnExportarDia">📅 Cirugías programadas</button>
+                  <button class="btn" id="btnExportarFacturadas">💰 Descargar Excel facturadas</button>
+                  <button class="btn" id="btnExportarVista">📄 Descargar Excel vista</button>
+                  <button class="btn" id="btnBackup">💾 Backup JSON</button>
+                  <button class="btn" id="btnImportar">📥 Importar JSON</button>
+                  <button class="btn" id="btnLentess">🧿 Lentess filtrados</button>
+                  <button class="btn" id="toggleKpisBtn">Mostrar/Ocultar KPIs</button>
+                  <hr style="border:none;border-top:1px solid #e2e8f0;margin:4px 0">
+                  <button class="btn" id="btnReparar" title="Limpiar caché y recargar desde Firestore" style="color:#b45309;border-color:#fcd34d">🔧 Reparar datos</button>
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div class="statsbar" id="statsbar"></div>
+      <div id="activeFiltersBar" class="active-filters-bar"></div>
+
+    </div>
+  </div>
+
+  <div class="app-shell content-card">
+
+    <div class="alerts-panel" id="alertsPanel"><div class="alerts-head"><span id="alertsTitle">Alertas</span><button id="btnCloseAlerts" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:13px">✕</button></div><div class="alerts-filters"><button class="af-btn active" id="af-TODAS" data-af="TODAS">Todas</button><button class="af-btn" id="af-criticas" data-af="criticas">Críticas</button></div><div id="alertsList"></div></div>
+
+    <div id="tabView"><div class="tablewrap"><div class="table-scroll"><table id="mainTable"><colgroup id="mainColgroup"></colgroup><thead id="mainThead"></thead><tbody id="tbody"></tbody></table></div></div></div>
+    <div id="pedirLenteView" style="display:none;margin:10px 0 20px"></div><div id="kanView" style="display:none"></div><div id="calView" style="display:none;margin:10px 0 20px"></div><div id="statsView" style="display:none;margin:10px 0 20px"></div><div id="facturarView" style="display:none;margin:10px 0 20px"></div><div id="waView" style="display:none;margin:10px 0 20px"></div><div id="adminView" style="display:none;margin:10px 0 20px"></div>
+  </div>
+
+  <div id="historyModal" style="display:none;position:fixed;inset:0;background:#0005;z-index:450;align-items:center;justify-content:center"><div style="background:#fff;border-radius:12px;max-width:860px;width:95%;max-height:85vh;overflow:hidden;display:flex;flex-direction:column"><div style="padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center"><div style="font-size:15px;font-weight:700" id="historyTitle">Historial de modificaciones</div><button id="btnCloseHistory" style="background:none;border:none;cursor:pointer;font-size:18px;color:#9ca3af">✕</button></div><div style="padding:14px 20px;flex:1;overflow-y:auto" id="historyBody"></div><div style="padding:12px 20px;border-top:1px solid #e2e8f0;display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="btnCloseHistory2">Cerrar</button></div></div></div>
+
+  <div class="side" id="sidePanel"><div class="side-head"><button class="btn" id="btnSideBack">← Volver</button><div><div class="side-name" id="sideName">—</div><div class="side-sub" id="sideSub">—</div></div><button class="side-close" id="btnCloseSide">✕</button></div><div class="side-body" id="sideBody"></div><div class="side-foot" id="sideFoot"></div></div>
+  <div id="sideOverlay" style="position:fixed;inset:0;background:#0003;z-index:299;display:none"></div>
+
+  <div id="exportModal" style="display:none;position:fixed;inset:0;background:#0005;z-index:400;align-items:center;justify-content:center"><div style="background:#fff;border-radius:12px;max-width:700px;width:95%;max-height:85vh;overflow:hidden;display:flex;flex-direction:column"><div style="padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center"><div style="font-size:15px;font-weight:700">📋 Listos para pedir lente</div><button id="btnCloseExport" style="background:none;border:none;cursor:pointer;font-size:18px;color:#9ca3af">✕</button></div><div style="padding:14px 20px;flex:1;overflow-y:auto" id="exportBody"></div><div style="padding:12px 20px;border-top:1px solid #e2e8f0;display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="btnCloseExport2">Cerrar</button><button class="btn primary" id="btnCopyExcel">Copiar TSV</button><button class="btn green" id="btnDownloadListos">↓ Descargar Excel</button></div></div></div>
+  <div id="stockModal" style="display:none;position:fixed;inset:0;background:#0005;z-index:410;align-items:center;justify-content:center"><div style="background:#fff;border-radius:12px;max-width:760px;width:95%;max-height:85vh;overflow:hidden;display:flex;flex-direction:column"><div style="padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center"><div style="font-size:15px;font-weight:700">🧪 Inventario de lentes</div><button id="btnCloseStock" style="background:none;border:none;cursor:pointer;font-size:18px;color:#9ca3af">✕</button></div><div style="padding:14px 20px;flex:1;overflow-y:auto" id="stockBody"></div><div style="padding:12px 20px;border-top:1px solid #e2e8f0;display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="btnCloseStock2">Cerrar</button></div></div></div>
+  <div id="recetasModal" style="display:none;position:fixed;inset:0;background:#0005;z-index:422;align-items:center;justify-content:center"><div style="background:#fff;border-radius:12px;max-width:900px;width:95%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column"><div style="padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center"><div style="font-size:15px;font-weight:700">🧾 PAMI recetas (post envío de documentos)</div><button id="btnCloseRecetas" style="background:none;border:none;cursor:pointer;font-size:18px;color:#9ca3af">✕</button></div><div id="recetasBody" style="padding:14px 20px;flex:1;overflow-y:auto"></div><div style="padding:12px 20px;border-top:1px solid #e2e8f0;display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="btnCloseRecetas2">Cerrar</button><button class="btn green" id="btnRunRecetas">▶ Ejecutar PAMI recetas</button></div></div></div>
+  <div id="lentessModal" style="display:none;position:fixed;inset:0;background:#0005;z-index:421;align-items:center;justify-content:center"><div style="background:#fff;border-radius:12px;max-width:900px;width:95%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column"><div style="padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center"><div style="font-size:15px;font-weight:700">🧿 Lentess desde filtros actuales</div><button id="btnCloseLentess" style="background:none;border:none;cursor:pointer;font-size:18px;color:#9ca3af">✕</button></div><div id="lentessBody" style="padding:14px 20px;flex:1;overflow-y:auto"></div><div style="padding:12px 20px;border-top:1px solid #e2e8f0;display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="btnCloseLentess2">Cerrar</button></div></div></div>
+
+  <div class="toast" id="toast"></div>
+
+</div>
+
+<script type="module" src="./js/firebase.js"></script>
+
+<script type="module">
+import { CLIENT_CONFIG } from './js/cliente-config.js';
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js';
+import { doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js';
+const $ = id => document.getElementById(id);
+document.title = `${CLIENT_CONFIG.nombreSistema} — ${CLIENT_CONFIG.nombreClinica}`;
+if ($('loginBrand')) $('loginBrand').textContent = CLIENT_CONFIG.nombreClinica;
+if ($('loginSystemName')) $('loginSystemName').textContent = CLIENT_CONFIG.nombreSistema;
+if ($('brandClinicaNombre')) $('brandClinicaNombre').textContent = CLIENT_CONFIG.nombreClinica;
+if ($('brandSistemaNombre')) $('brandSistemaNombre').textContent = `${CLIENT_CONFIG.nombreSistema} · Operación diaria clínica`;
+if (CLIENT_CONFIG.branding?.colorPrincipal) document.documentElement.style.setProperty('--brand-primary', CLIENT_CONFIG.branding.colorPrincipal);
+function showLogin(message = '') { $('loginScreen').style.display = 'flex'; $('appContent').style.display = 'none'; const err = $('loginError'); err.textContent = message; err.style.display = message ? 'block' : 'none'; }
+function showApp(profile, email) { $('loginScreen').style.display = 'none'; $('appContent').style.display = 'block'; $('authUserBadge').style.display = 'inline-flex'; $('authRoleBadge').style.display = 'inline-flex'; $('logoutBtn').style.display = 'inline-flex'; $('authUserBadge').textContent = email || ''; $('authRoleBadge').textContent = profile?.role || 'readonly'; }
+function friendlyAuthError(code) { return ({ 'auth/invalid-credential':'Correo o contraseña incorrectos.', 'auth/invalid-login-credentials':'Correo o contraseña incorrectos.', 'auth/user-not-found':'La cuenta no existe.', 'auth/wrong-password':'La contraseña es incorrecta.', 'auth/too-many-requests':'Demasiados intentos. Intentá de nuevo en unos minutos.', 'auth/network-request-failed':'No se pudo conectar con Firebase. Revisá internet.' })[code] || 'No se pudo iniciar sesión.'; }
+async function waitConnector() { if (window.firestoreConnector) return window.firestoreConnector; return new Promise(resolve => { const handler = () => { if (window.firestoreConnector) { window.removeEventListener('firestoreReady', handler); resolve(window.firestoreConnector); } }; window.addEventListener('firestoreReady', handler); }); }
+const connector = await waitConnector(); await connector.ready;
+const auth = connector.getAuth(); const db = connector.getDb();
+async function doLogin() { const email = $('loginEmail').value.trim(); const pass = $('loginPass').value; const btn = $('loginBtn'); $('loginError').style.display = 'none'; if (!email || !pass) { showLogin('Completá correo y contraseña.'); return; } try { btn.disabled = true; btn.textContent = 'Ingresando…'; await signInWithEmailAndPassword(auth, email, pass); } catch (err) { console.error('[Auth]', err); showLogin(friendlyAuthError(err.code)); } finally { btn.disabled = false; btn.textContent = 'Ingresar'; } }
+$('loginForm').addEventListener('submit', e => { e.preventDefault(); doLogin(); }); $('loginBtn').addEventListener('click', e => { e.preventDefault(); doLogin(); }); $('loginEmail').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doLogin(); } }); $('loginPass').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doLogin(); } });
+$('logoutBtn').addEventListener('click', () => signOut(auth));
+onAuthStateChanged(auth, async user => { if (!user) { showLogin(''); return; } try { const snap = await getDoc(doc(db, 'usuarios', user.uid)); if (!snap.exists()) { await signOut(auth); showLogin('Tu cuenta no tiene perfil habilitado en Firestore (colección usuarios).'); return; } const profile = snap.data() || {}; if (profile.active !== true) { await signOut(auth); showLogin('Tu cuenta está desactivada.'); return; } showApp(profile, user.email); window.CURRENT_USER = { uid: user.uid, email: user.email, profile }; window.__authReady = true; window.dispatchEvent(new CustomEvent('authReady', { detail: window.CURRENT_USER })); await window.startOriginalApp?.(); } catch (err) { console.error('[Auth profile]', err); await signOut(auth); showLogin('No se pudo validar el perfil del usuario.'); } });
+</script>
+
+<script type="module" src="./js/app.js"></script>
+
+</body>
+</html>
