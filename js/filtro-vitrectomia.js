@@ -19,6 +19,24 @@ function buscarPaciente(id) {
   return DB.rows.find(p => normalizeId(p.id) === sid) || null;
 }
 
+function asegurarCheckbox() {
+  let filtro = document.getElementById(ID_FILTRO);
+  if (filtro) return filtro;
+
+  const contenedor = document.querySelector('.advanced-filters-body');
+  if (!contenedor) return null;
+
+  const label = document.createElement('label');
+  label.className = 'filter-label';
+  label.innerHTML = `<input type="checkbox" id="${ID_FILTRO}"> Solo vitrectomía`;
+
+  const fechaProgramada = document.getElementById('fFechaCir')?.closest('label');
+  if (fechaProgramada?.parentNode === contenedor) fechaProgramada.insertAdjacentElement('afterend', label);
+  else contenedor.insertBefore(label, contenedor.querySelector('#showSilenced')?.closest('label') || null);
+
+  return document.getElementById(ID_FILTRO);
+}
+
 function mostrarFechaFacturacion(tr, p) {
   const td = tr.querySelector('td[data-label="Fecha clave"]');
   if (!td) return;
@@ -51,7 +69,7 @@ function aplicar() {
 }
 
 function iniciar() {
-  const filtro = document.getElementById(ID_FILTRO);
+  const filtro = asegurarCheckbox();
   const tbody = document.getElementById('tbody');
   if (!filtro || !tbody || window.vitrectomiaPrincipalLista) return;
   window.vitrectomiaPrincipalLista = true;
