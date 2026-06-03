@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <?!= include('Style'); ?>
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Control de Cremas</h1>
+      <p>Stock, entregas, pagos parciales y deudores</p>
+    </div>
+    <button onclick="cargarTodo()">Actualizar</button>
+  </header>
+
+  <main class="wrap">
+    <section class="grid cards">
+      <div class="card"><span>Ventas mes</span><strong id="kpiVentas">$ 0</strong></div>
+      <div class="card"><span>Cobrado mes</span><strong id="kpiCobrado">$ 0</strong></div>
+      <div class="card"><span>Saldo pendiente</span><strong id="kpiSaldo">$ 0</strong></div>
+      <div class="card"><span>Ganancia estimada</span><strong id="kpiGanancia">$ 0</strong></div>
+    </section>
+
+    <section class="panel">
+      <h2>Nueva entrega / venta</h2>
+      <div class="grid formgrid">
+        <label>Paciente
+          <select id="ventaPaciente"></select>
+        </label>
+        <label>Fecha
+          <input type="date" id="ventaFecha">
+        </label>
+        <label>Forma de pago
+          <select id="ventaFormaPago"></select>
+        </label>
+        <label>Descuento general (%)
+          <input type="number" id="ventaDescGeneral" min="0" max="100" value="0">
+        </label>
+        <label>Pagado ahora
+          <input type="number" id="ventaPagado" min="0" value="0">
+        </label>
+        <label>Observaciones
+          <input type="text" id="ventaObs">
+        </label>
+      </div>
+
+      <h3>Productos</h3>
+      <div class="row">
+        <select id="itemProducto"></select>
+        <input type="number" id="itemCantidad" min="1" value="1" placeholder="Cantidad">
+        <input type="number" id="itemPrecio" min="0" placeholder="Precio venta">
+        <input type="number" id="itemDesc" min="0" max="100" value="0" placeholder="Desc %">
+        <button onclick="agregarItemVenta()">Agregar</button>
+      </div>
+      <div id="itemsVenta"></div>
+      <div class="actions">
+        <button class="primary" onclick="guardarVentaUI()">Guardar entrega / venta</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Nuevo paciente</h2>
+      <div class="grid formgrid">
+        <label>Apellido <input id="pacApellido"></label>
+        <label>Nombre <input id="pacNombre"></label>
+        <label>DNI <input id="pacDni"></label>
+        <label>Teléfono <input id="pacTelefono"></label>
+        <label>Observaciones <input id="pacObs"></label>
+      </div>
+      <button class="primary" onclick="crearPacienteUI()">Guardar paciente</button>
+    </section>
+
+    <section class="panel">
+      <h2>Compra / ingreso de stock</h2>
+      <p class="muted">Regla base: 15 unidades del mismo producto = 20%.</p>
+      <div class="row">
+        <select id="compraProducto"></select>
+        <input type="number" id="compraCantidad" min="1" value="15" placeholder="Cantidad">
+        <button onclick="agregarItemCompra()">Agregar</button>
+      </div>
+      <label>Observaciones <input id="compraObs"></label>
+      <div id="itemsCompra"></div>
+      <button class="primary" onclick="confirmarCompraUI()">Confirmar compra y sumar stock</button>
+    </section>
+
+    <section class="panel">
+      <h2>Deudores</h2>
+      <div id="tablaDeudores"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Últimas ventas</h2>
+      <div id="tablaVentas"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Stock</h2>
+      <input id="buscarStock" placeholder="Buscar producto..." oninput="renderStock()">
+      <div id="tablaStock"></div>
+    </section>
+  </main>
+
+  <div id="toast"></div>
+  <?!= include('Script'); ?>
+</body>
+</html>
