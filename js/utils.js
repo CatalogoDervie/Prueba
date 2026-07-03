@@ -21,9 +21,13 @@ export function jsq(v) {
   return JSON.stringify(String(v ?? ''));
 }
 
-// ── Retorna la fecha de hoy en formato ISO YYYY-MM-DD ─────────────────────
+// ── Retorna la fecha local de hoy en formato ISO YYYY-MM-DD ────────────────
+// No se usa toISOString() porque trabaja en UTC y en Argentina podía adelantar
+// el día después de las 21:00.
 export function hoyISO() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 // ── Parsea una fecha como objeto Date sin hora (00:00:00) ─────────────────
@@ -106,12 +110,12 @@ export function downloadTextFile(filename, content, mime = 'text/plain;charset=u
   setTimeout(() => URL.revokeObjectURL(a.href), 1500);
 }
 
-// ── Solo dígitos ──────────────────────────────────────────────────────────
+// ── Solo dígitos ─────────────────────────────────────────────────────────
 export function cleanDigits(v) {
   return String(v || '').replace(/\D+/g, '');
 }
 
-// ── Detecta delimitador CSV ───────────────────────────────────────────────
+// ── Detecta delimitador CSV ──────────────────────────────────────────────
 export function detectDelimiter(line) {
   const c = (line.match(/,/g) || []).length;
   const sc = (line.match(/;/g) || []).length;
@@ -132,7 +136,7 @@ export function parseDelimitedRows(text) {
   });
 }
 
-// ── Toast de notificación ─────────────────────────────────────────────────
+// ── Toast de notificación ────────────────────────────────────────────────
 let _toastTimer = null;
 export function toast(msg, duration = 2800) {
   const el = document.getElementById('toast');
@@ -143,7 +147,7 @@ export function toast(msg, duration = 2800) {
   _toastTimer = setTimeout(() => el.classList.remove('show'), duration);
 }
 
-// ── IndexedDB helpers ─────────────────────────────────────────────────────
+// ── IndexedDB helpers ────────────────────────────────────────────────────
 function configureIDB() {
   return new Promise(res => {
     if (!window.indexedDB) return res(null);

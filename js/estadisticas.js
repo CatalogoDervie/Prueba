@@ -1,11 +1,16 @@
 'use strict';
 
-import { DB, stateKey, WORKFLOW_KEYS, isFacturadoCompleto, getFechaFacturadaBase } from './state.js';
-import { escapeHtml, escapeAttr, diffDays } from './utils.js';
+import { DB, stateKey, WORKFLOW_KEYS, isFacturadoCompleto } from './state.js';
+import { escapeHtml, escapeAttr, diffDays, fd, fdInput, hoyISO, downloadTextFile, toast } from './utils.js';
 
-const KEY = 'indicadores_v6_filters';
+const KEY = 'indicadores_v7_filters';
+const LEGACY_KEY = 'indicadores_v6_filters';
 const TARGET_VITRECTOMIAS_POR_CLINICA = 16;
 
+function safeJson(key) {
+  try { return JSON.parse(localStorage.getItem(key) || '{}') || {}; }
+  catch (_) { return {}; }
+}
 function monthKey(v) { return String(v || '').slice(0, 7); }
 function monthDate(key) {
   if (!key) return null;
@@ -13,10 +18,7 @@ function monthDate(key) {
   if (!y || !m) return null;
   return new Date(y, m - 1, 1);
 }
-function currentMonthKey() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
+function currentMonthKey() { return hoyISO().slice(0, 7); }
 function monthLabel(key) {
   const dt = monthDate(key);
   return dt ? new Intl.DateTimeFormat('es-AR', { month: 'short', year: '2-digit' }).format(dt) : '—';
@@ -28,6 +30,27 @@ function median(values) {
   const mid = Math.floor(arr.length / 2);
   return arr.length % 2 ? arr[mid] : Math.round((arr[mid - 1] + arr[mid]) / 2);
 }
+function truthy(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+  return v === true || ['1', 'true', 'si', 'sí', 's'].includes(s);
+}
+function hasVitrectomia(row) {
+  return !!row && (truthy(row.extraVitrectomia) || truthy(row.vitrectomia) || truthy(row.extras?.vitrectomia));
+}
+function fechaISO(v) { return fdInput(v); }
+
+// Fecha real cargada por el usuario. No se infiere desde updatedAt ni desde fechaCir.
+function fechaFacturadaReal(row) {
+  return fechaISO(row?.fechaFacturada || row?.fechaFacturacion || '');
+}
+function fechaOperativa(row) {
+  return fechaFacturadaReal(row) || fechaISO(row?.fechaCir) || fechaISO(row?.fechaLlegaLente) || fechaISO(row?.fechaSolLente);
+}
+function personKey(row) {
+  const dni = String(row?.dni || '').replace(/\D+/g, '');
+  return dni || String(row?.id || `${row?.nombre || ''}|${row?.afiliado || ''}`);
+}
+function csvCell(v) { return `"${String(v ?? '').replace(/"/g, '""')}"`; }
 
 function stageOf(row) {
   const k = stateKey(row);
@@ -43,70 +66,112 @@ function stageOf(row) {
 }
 
 function allMonths(rows) {
-  return [...new Set(rows.map(r => monthKey(getFechaFacturadaBase(r) || r.fechaCir || r.fechaLlegaLente || r.fechaSolLente)).filter(Boolean))].sort();
+  return [...new Set(rows.map(r => monthKey(fechaOperativa(r))).filter(Boolean))].sort();
 }
-
+function normalizeVitFilter(v) { return ['ALL', 'CON', 'SIN'].includes(v) ? v : 'ALL'; }
 function readFilters(rows) {
-  const clinics = [...new Set(rows.map(r => r.clinica).filter(Boolean))].sort();
-  const obras = [...new Set(rows.map(r => r.obraSocial).filter(Boolean))].sort();
+  const clinics = [...new Set(rows.map(r => r.clinica).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+  const obras = [...new Set(rows.map(r => r.obraSocial).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
   const months = allMonths(rows);
-  const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+  const legacy = safeJson(LEGACY_KEY);
+  const saved = Object.assign({}, legacy, safeJson(KEY));
+  const screen = ['resumen', 'tiempos', 'produccion', 'detalle'].includes(saved.screen) ? saved.screen : 'resumen';
+  const savedFrom = saved.fromMonth ?? saved.from;
+  const savedTo = saved.toMonth ?? saved.to;
   return {
-    screen: ['resumen', 'tiempos', 'produccion'].includes(saved.screen) ? saved.screen : 'resumen',
+    screen,
     clinica: clinics.includes(saved.clinica) ? saved.clinica : '',
     obra: obras.includes(saved.obra) ? saved.obra : '',
-    from: months.includes(saved.from) ? saved.from : (months[0] || ''),
-    to: months.includes(saved.to) ? saved.to : (months[months.length - 1] || ''),
+    fromMonth: months.includes(savedFrom) ? savedFrom : (months[0] || ''),
+    toMonth: months.includes(savedTo) ? savedTo : (months[months.length - 1] || ''),
     splitClinic: !!saved.splitClinic,
+    detailFrom: fechaISO(saved.detailFrom || ''),
+    detailTo: fechaISO(saved.detailTo || ''),
+    detailVit: normalizeVitFilter(saved.detailVit),
+    detailSearch: String(saved.detailSearch || ''),
     clinics,
     obras,
     months
   };
 }
+function persistableFilters(f) {
+  return {
+    screen: f.screen,
+    clinica: f.clinica,
+    obra: f.obra,
+    fromMonth: f.fromMonth,
+    toMonth: f.toMonth,
+    splitClinic: !!f.splitClinic,
+    detailFrom: f.detailFrom,
+    detailTo: f.detailTo,
+    detailVit: normalizeVitFilter(f.detailVit),
+    detailSearch: String(f.detailSearch || '')
+  };
+}
+function saveFilters(next) { localStorage.setItem(KEY, JSON.stringify(persistableFilters(next))); }
 
-function applyFilters(rows, f) {
+function applyGeneralFilters(rows, f) {
   return rows.filter(r => {
-    const mk = monthKey(getFechaFacturadaBase(r) || r.fechaCir || r.fechaLlegaLente || r.fechaSolLente);
-    if (f.from && mk && mk < f.from) return false;
-    if (f.to && mk && mk > f.to) return false;
     if (f.clinica && r.clinica !== f.clinica) return false;
     if (f.obra && r.obraSocial !== f.obra) return false;
     return true;
   });
 }
-
-function applyNonTemporalFilters(rows, f) {
+function applyOperationalPeriod(rows, f) {
   return rows.filter(r => {
-    if (f.clinica && r.clinica !== f.clinica) return false;
-    if (f.obra && r.obraSocial !== f.obra) return false;
+    const mk = monthKey(fechaOperativa(r));
+    if (f.fromMonth && mk && mk < f.fromMonth) return false;
+    if (f.toMonth && mk && mk > f.toMonth) return false;
     return true;
   });
 }
-
-function saveFilters(next) { localStorage.setItem(KEY, JSON.stringify(next)); }
+function applyBillingMonthPeriod(rows, f) {
+  return rows.filter(r => {
+    const mk = monthKey(fechaFacturadaReal(r));
+    if (!mk) return false;
+    if (f.fromMonth && mk < f.fromMonth) return false;
+    if (f.toMonth && mk > f.toMonth) return false;
+    return true;
+  });
+}
+function applyDetailFilters(rows, f) {
+  const q = String(f.detailSearch || '').trim().toLowerCase();
+  return rows.filter(r => {
+    const fact = fechaFacturadaReal(r);
+    if (!fact) return false;
+    if (f.detailFrom && fact < f.detailFrom) return false;
+    if (f.detailTo && fact > f.detailTo) return false;
+    if (f.detailVit === 'CON' && !hasVitrectomia(r)) return false;
+    if (f.detailVit === 'SIN' && hasVitrectomia(r)) return false;
+    if (q) {
+      const haystack = [r.nombre, r.dni, r.afiliado, r.obraSocial, r.clinica, r.ojo]
+        .map(v => String(v || '').toLowerCase()).join(' ');
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  }).sort((a, b) => {
+    const fa = fechaFacturadaReal(a), fb = fechaFacturadaReal(b);
+    return fb.localeCompare(fa) || String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' });
+  });
+}
 
 function summaryCard(label, value, help = '', tone = '') {
-  return `<div class="stats-mini-card ${tone ? `stats-mini-card-${tone}` : ''}"><div class="stats-mini-label">${escapeHtml(label)}</div><div class="stats-mini-value">${value}</div>${help ? `<div class="stats-mini-help">${escapeHtml(help)}</div>` : ''}</div>`;
+  return `<div class="stats-mini-card ${tone ? `stats-mini-card-${tone}` : ''}"><div class="stats-mini-label">${escapeHtml(label)}</div><div class="stats-mini-value">${escapeHtml(value)}</div>${help ? `<div class="stats-mini-help">${escapeHtml(help)}</div>` : ''}</div>`;
 }
-
 function barChartCard({ title, subtitle = '', series, percent = false, targetLine = null, targetLabel = '' }) {
   const labels = series[0]?.points.map(p => p.x) || [];
   const maxData = Math.max(1, ...series.flatMap(s => s.points.map(p => p.y || 0)), targetLine || 0);
   const barGroups = labels.length || 1;
   const w = Math.max(760, barGroups * 92);
   const h = 330;
-  const left = 56;
-  const top = 24;
-  const bottom = 70;
+  const left = 56, top = 24, bottom = 70;
   const chartH = h - top - bottom;
   const groupW = (w - left - 24) / Math.max(1, barGroups);
   const gap = Math.min(12, groupW * 0.16);
   const barW = Math.max(14, (groupW - gap * (series.length + 1)) / Math.max(1, series.length));
   const colors = ['#1d4ed8', '#16a34a', '#7c3aed', '#ea580c'];
   const legendItems = [...series.map((s, i) => ({ name: s.name, color: colors[i % colors.length] }))];
-  let bars = '';
-  let valueLabels = '';
-  let xLabels = '';
+  let bars = '', valueLabels = '', xLabels = '';
   labels.forEach((label, i) => {
     const gx = left + i * groupW;
     series.forEach((s, idx) => {
@@ -120,16 +185,12 @@ function barChartCard({ title, subtitle = '', series, percent = false, targetLin
     });
     xLabels += `<text x="${(gx + groupW / 2).toFixed(2)}" y="${h - 24}" text-anchor="middle" font-size="11" fill="#475569" font-weight="600">${escapeHtml(label)}</text>`;
   });
-
   let targetSvg = '';
   if (targetLine != null) {
     const y = top + chartH - ((targetLine / maxData) * chartH);
-    targetSvg = `
-      <line x1="${left}" x2="${w - 16}" y1="${y.toFixed(2)}" y2="${y.toFixed(2)}" stroke="#dc2626" stroke-width="2" stroke-dasharray="8 6"></line>
-      <text x="${w - 20}" y="${(y - 8).toFixed(2)}" text-anchor="end" font-size="11" fill="#b91c1c" font-weight="700">${escapeHtml(targetLabel || `Meta ${targetLine}`)}</text>`;
+    targetSvg = `<line x1="${left}" x2="${w - 16}" y1="${y.toFixed(2)}" y2="${y.toFixed(2)}" stroke="#dc2626" stroke-width="2" stroke-dasharray="8 6"></line><text x="${w - 20}" y="${(y - 8).toFixed(2)}" text-anchor="end" font-size="11" fill="#b91c1c" font-weight="700">${escapeHtml(targetLabel || `Meta ${targetLine}`)}</text>`;
     legendItems.push({ name: targetLabel || `Meta ${targetLine}`, color: '#dc2626', dashed: true });
   }
-
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map(r => {
     const val = Math.round(maxData * r);
     const y = top + chartH - (chartH * r);
@@ -138,12 +199,10 @@ function barChartCard({ title, subtitle = '', series, percent = false, targetLin
   const legends = legendItems.map(item => `<span class="chart-legend-item"><i style="background:${item.color};${item.dashed ? 'border-top:2px dashed #dc2626;height:0;background:transparent' : ''}"></i>${escapeHtml(item.name)}</span>`).join('');
   return `<section class="stats-card"><div class="stats-card-head"><div><h4>${escapeHtml(title)}</h4>${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ''}</div></div><div class="chart-legend">${legends}</div><div class="chart-scroll"><svg viewBox="0 0 ${w} ${h}" class="bar-chart-svg">${yTicks}${targetSvg}${bars}${valueLabels}${xLabels}</svg></div></section>`;
 }
-
 function simpleBarsCard(title, rows, suffix = '', help = '') {
   const max = Math.max(1, ...rows.map(r => r.value || 0));
   return `<section class="stats-card"><div class="stats-card-head"><div><h4>${escapeHtml(title)}</h4>${help ? `<p>${escapeHtml(help)}</p>` : ''}</div></div><div class="rank-list">${rows.map(r => `<div class="rank-row"><span class="rank-label">${escapeHtml(r.label)}</span><div class="rank-bar"><div class="rank-fill" style="width:${Math.max(4, (r.value / max) * 100)}%"></div></div><strong class="rank-value">${r.value}${escapeHtml(suffix)}</strong></div>`).join('') || '<div class="empty">Sin datos</div>'}</div></section>`;
 }
-
 function valuesByClinic(rows, getValue) {
   const map = new Map();
   rows.forEach(r => {
@@ -155,6 +214,29 @@ function valuesByClinic(rows, getValue) {
   });
   return [...map.entries()].map(([label, arr]) => ({ label, value: avg(arr) })).sort((a, b) => b.value - a.value);
 }
+function monthRange(offset = 0) {
+  const now = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  const last = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
+  return { from: fdInput(first), to: fdInput(last) };
+}
+function detailToolbar(f) {
+  return `<div class="stats-toolbar" style="align-items:end">
+    <label style="font-size:11px;color:#64748b">Buscar paciente, DNI o afiliado<input id="inDetailSearch" class="an-select" type="search" value="${escapeAttr(f.detailSearch)}" placeholder="Buscar..." style="display:block;min-width:230px;margin-top:4px"></label>
+    <label style="font-size:11px;color:#64748b">Facturada desde<input id="inDetailFrom" class="an-select" type="date" value="${escapeAttr(f.detailFrom)}" style="display:block;margin-top:4px"></label>
+    <label style="font-size:11px;color:#64748b">Facturada hasta<input id="inDetailTo" class="an-select" type="date" value="${escapeAttr(f.detailTo)}" style="display:block;margin-top:4px"></label>
+    <label style="font-size:11px;color:#64748b">Vitrectomía<select id="inDetailVit" class="an-select" style="display:block;margin-top:4px"><option value="ALL" ${f.detailVit === 'ALL' ? 'selected' : ''}>Todas</option><option value="CON" ${f.detailVit === 'CON' ? 'selected' : ''}>Con vitrectomía</option><option value="SIN" ${f.detailVit === 'SIN' ? 'selected' : ''}>Sin vitrectomía</option></select></label>
+    <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn" data-detail-preset="month">Este mes</button><button class="btn" data-detail-preset="previous">Mes anterior</button><button class="btn" data-detail-preset="today">Hoy</button><button class="btn" data-detail-preset="clear">Limpiar fechas</button></div>
+  </div>`;
+}
+function commonToolbar(f) {
+  const common = `<select id="inCli" class="an-select"><option value="">Todas las clínicas</option>${f.clinics.map(v => `<option value="${escapeAttr(v)}" ${v === f.clinica ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')}</select><select id="inObra" class="an-select"><option value="">Todas las obras sociales</option>${f.obras.map(v => `<option value="${escapeAttr(v)}" ${v === f.obra ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')}</select>`;
+  if (f.screen === 'detalle') return `<div class="stats-toolbar">${common}<button class="btn" id="inClearGeneral">Limpiar clínica/obra social</button></div>${detailToolbar(f)}`;
+  return `<div class="stats-toolbar">${common}<select id="inFrom" class="an-select"><option value="">Desde</option>${f.months.map(v => `<option value="${escapeAttr(v)}" ${v === f.fromMonth ? 'selected' : ''}>${escapeHtml(monthLabel(v))}</option>`).join('')}</select><select id="inTo" class="an-select"><option value="">Hasta</option>${f.months.map(v => `<option value="${escapeAttr(v)}" ${v === f.toMonth ? 'selected' : ''}>${escapeHtml(monthLabel(v))}</option>`).join('')}</select><label class="stats-check"><input type="checkbox" id="inSplit" ${f.splitClinic ? 'checked' : ''}> Comparar clínicas</label><button class="btn" id="inClearGeneral">Limpiar filtros</button></div>`;
+}
+function detailTable(rows) {
+  return `<section class="stats-card" style="margin-top:12px"><div class="stats-card-head"><div><h4>Personas con fecha facturada real</h4><p>Ordenadas desde la fecha de facturación más reciente. No se incluyen fechas inferidas por estado o última modificación.</p></div><button class="btn green" id="btnExportDetail">↓ Descargar CSV</button></div><div class="table-scroll"><table class="module-table" style="min-width:1180px"><thead><tr><th>Fecha facturada</th><th>Paciente</th><th>DNI</th><th>Afiliado</th><th>Obra social</th><th>Clínica</th><th>Ojo</th><th>Fecha cirugía</th><th>Vitrectomía</th><th>Estado</th><th></th></tr></thead><tbody>${rows.length ? rows.map(r => `<tr><td><strong>${escapeHtml(fd(fechaFacturadaReal(r)) || fechaFacturadaReal(r))}</strong></td><td>${escapeHtml(r.nombre || '—')}</td><td>${escapeHtml(r.dni || '—')}</td><td>${escapeHtml(r.afiliado || '—')}</td><td>${escapeHtml(r.obraSocial || '—')}</td><td>${escapeHtml(r.clinica || '—')}</td><td>${escapeHtml(r.ojo || '—')}</td><td>${escapeHtml(fd(r.fechaCir) || '—')}</td><td><span class="badge ${hasVitrectomia(r) ? 'b6' : 'b1'}">${hasVitrectomia(r) ? 'Sí' : 'No'}</span></td><td>${escapeHtml(stageOf(r))}</td><td><button class="btn" data-open-detail-row="${escapeAttr(r.id)}">Ver</button></td></tr>`).join('') : '<tr><td colspan="11"><div class="empty">No hay personas con fecha facturada para los filtros elegidos.</div></td></tr>'}</tbody></table></div></section>`;
+}
 
 export function renderEstadisticas() {
   const view = document.getElementById('statsView');
@@ -162,178 +244,116 @@ export function renderEstadisticas() {
 
   const all = DB.rows || [];
   const f = readFilters(all);
-  const rows = applyFilters(all, f);
-  const rowsNoTime = applyNonTemporalFilters(all, f);
-  const clinicsInScope = [...new Set(rowsNoTime.map(r => r.clinica || 'Sin clínica'))];
-  const visibleClinics = f.splitClinic ? clinicsInScope : ['Total'];
-  const factRows = rows.filter(r => isFacturadoCompleto(r.estadoFac));
-  const factMonths = [...new Set(factRows.map(r => monthKey(getFechaFacturadaBase(r))).filter(Boolean))].sort();
+  const generalRows = applyGeneralFilters(all, f);
+  const operationalRows = applyOperationalPeriod(generalRows, f);
+  const billingRowsAll = generalRows.filter(r => !!fechaFacturadaReal(r));
+  const billingRowsPeriod = applyBillingMonthPeriod(billingRowsAll, f);
+  const detailRows = applyDetailFilters(billingRowsAll, f);
+  const clinicsInScope = [...new Set(generalRows.map(r => r.clinica || 'Sin clínica'))];
+  const visibleClinics = f.splitClinic ? (clinicsInScope.length ? clinicsInScope : ['Sin clínica']) : ['Total'];
 
+  const factMonths = [...new Set(billingRowsPeriod.map(r => monthKey(fechaFacturadaReal(r))).filter(Boolean))].sort();
   const byMonthFact = selector => visibleClinics.map(cl => ({
     name: cl,
     points: factMonths.map(m => {
-      const base = factRows.filter(r => monthKey(getFechaFacturadaBase(r)) === m && (cl === 'Total' || (r.clinica || 'Sin clínica') === cl));
+      const base = billingRowsPeriod.filter(r => monthKey(fechaFacturadaReal(r)) === m && (cl === 'Total' || (r.clinica || 'Sin clínica') === cl));
       return { x: monthLabel(m), y: selector(base) };
     })
   }));
 
-  const pedidoALlegadaDone = rows.filter(r => r.fechaSolLente && r.fechaLlegaLente)
-    .map(r => diffDays(r.fechaLlegaLente, r.fechaSolLente))
-    .filter(v => v != null && v >= 0);
-  const llegadaAFechaDone = rows.filter(r => r.fechaLlegaLente && r.fechaCir)
-    .map(r => diffDays(r.fechaCir, r.fechaLlegaLente))
-    .filter(v => v != null && v >= 0);
-  const cirugiaAFacturaDone = factRows.filter(r => r.fechaCir && getFechaFacturadaBase(r))
-    .map(r => diffDays(getFechaFacturadaBase(r), r.fechaCir))
-    .filter(v => v != null && v >= 0);
+  const pedidoALlegadaDone = operationalRows.filter(r => r.fechaSolLente && r.fechaLlegaLente).map(r => diffDays(r.fechaLlegaLente, r.fechaSolLente)).filter(v => v != null && v >= 0);
+  const llegadaAFechaDone = operationalRows.filter(r => r.fechaLlegaLente && r.fechaCir).map(r => diffDays(r.fechaCir, r.fechaLlegaLente)).filter(v => v != null && v >= 0);
+  const cirugiaAFacturaDone = billingRowsPeriod.filter(r => r.fechaCir).map(r => diffDays(fechaFacturadaReal(r), r.fechaCir)).filter(v => v != null && v >= 0);
+  const waitingOpen = operationalRows.filter(r => stateKey(r) === WORKFLOW_KEYS.ESPERANDO_LENTE).map(r => diffDays(hoyISO(), r.fechaSolLente)).filter(v => v != null && v >= 0);
+  const arrivedOpen = operationalRows.filter(r => stateKey(r) === WORKFLOW_KEYS.LLEGO_LENTE_PROGRAMAR).map(r => diffDays(hoyISO(), r.fechaLlegaLente)).filter(v => v != null && v >= 0);
+  const billingOpen = operationalRows.filter(r => stateKey(r) === WORKFLOW_KEYS.REALIZADA_FALTA_FACTURAR).map(r => diffDays(hoyISO(), r.fechaCir)).filter(v => v != null && v >= 0);
 
-  const waitingOpen = rows.filter(r => stateKey(r) === WORKFLOW_KEYS.ESPERANDO_LENTE)
-    .map(r => diffDays(new Date(), r.fechaSolLente))
-    .filter(v => v != null && v >= 0);
-  const arrivedOpen = rows.filter(r => stateKey(r) === WORKFLOW_KEYS.LLEGO_LENTE_PROGRAMAR)
-    .map(r => diffDays(new Date(), r.fechaLlegaLente))
-    .filter(v => v != null && v >= 0);
-  const billingOpen = rows.filter(r => stateKey(r) === WORKFLOW_KEYS.REALIZADA_FALTA_FACTURAR)
-    .map(r => diffDays(new Date(), r.fechaCir))
-    .filter(v => v != null && v >= 0);
-
-  const stageCounts = rows.reduce((acc, r) => {
-    const k = stageOf(r);
-    acc[k] = (acc[k] || 0) + 1;
-    return acc;
-  }, {});
-
-  const avgPedidoLlegadaByClinic = valuesByClinic(rows.filter(r => r.fechaSolLente && r.fechaLlegaLente), r => diffDays(r.fechaLlegaLente, r.fechaSolLente));
-  const avgLlegadaCirugiaByClinic = valuesByClinic(rows.filter(r => r.fechaLlegaLente && r.fechaCir), r => diffDays(r.fechaCir, r.fechaLlegaLente));
-  const avgCirugiaFacturaByClinic = valuesByClinic(factRows.filter(r => r.fechaCir && getFechaFacturadaBase(r)), r => diffDays(getFechaFacturadaBase(r), r.fechaCir));
+  const stageCounts = operationalRows.reduce((acc, r) => { const k = stageOf(r); acc[k] = (acc[k] || 0) + 1; return acc; }, {});
+  const avgPedidoLlegadaByClinic = valuesByClinic(operationalRows.filter(r => r.fechaSolLente && r.fechaLlegaLente), r => diffDays(r.fechaLlegaLente, r.fechaSolLente));
+  const avgLlegadaCirugiaByClinic = valuesByClinic(operationalRows.filter(r => r.fechaLlegaLente && r.fechaCir), r => diffDays(r.fechaCir, r.fechaLlegaLente));
+  const avgCirugiaFacturaByClinic = valuesByClinic(billingRowsPeriod.filter(r => r.fechaCir), r => diffDays(fechaFacturadaReal(r), r.fechaCir));
 
   const factMonthly = byMonthFact(base => base.length);
-  const vitMonthly = byMonthFact(base => base.filter(r => !!r.extraVitrectomia).length);
-  const vitPctMonthly = byMonthFact(base => {
-    if (!base.length) return 0;
-    const vit = base.filter(r => !!r.extraVitrectomia).length;
-    return Math.round((vit / base.length) * 100);
-  });
-
-  const totalFact = factRows.length;
-  const totalVit = factRows.filter(r => !!r.extraVitrectomia).length;
+  const vitMonthly = byMonthFact(base => base.filter(hasVitrectomia).length);
+  const vitPctMonthly = byMonthFact(base => base.length ? Math.round((base.filter(hasVitrectomia).length / base.length) * 100) : 0);
+  const totalFact = billingRowsPeriod.length;
+  const totalVit = billingRowsPeriod.filter(hasVitrectomia).length;
   const pctVitTotal = totalFact ? Math.round((totalVit / totalFact) * 100) : 0;
-
   const focusMonth = factMonths.includes(currentMonthKey()) ? currentMonthKey() : (factMonths[factMonths.length - 1] || currentMonthKey());
   const focusMonthLabel = monthLabel(focusMonth);
-  const focusClinics = f.clinica ? [f.clinica] : (clinicsInScope.length ? clinicsInScope : ['CDU']);
-  const targetMonth = TARGET_VITRECTOMIAS_POR_CLINICA * Math.max(1, f.splitClinic ? 1 : focusClinics.length);
-  const vitCurrentMonth = factRows.filter(r => monthKey(getFechaFacturadaBase(r)) === focusMonth)
-    .filter(r => f.clinica ? r.clinica === f.clinica : true)
-    .filter(r => !!r.extraVitrectomia).length;
+  const targetMonth = TARGET_VITRECTOMIAS_POR_CLINICA * Math.max(1, f.splitClinic ? 1 : (f.clinica ? 1 : Math.max(1, clinicsInScope.length)));
+  const vitCurrentMonth = billingRowsPeriod.filter(r => monthKey(fechaFacturadaReal(r)) === focusMonth && hasVitrectomia(r)).length;
   const faltanVitCurrent = Math.max(0, targetMonth - vitCurrentMonth);
 
-  const header = `
-    <div class="stats-shell">
-      <div class="stats-title-wrap">
-        <div>
-          <div class="stats-title">Estadísticas</div>
-          <div class="stats-subtitle">Toda la analítica usa la misma lógica de estados que la operación diaria y prioriza lectura rápida.</div>
-        </div>
-      </div>
-      <div class="stats-toolbar">
-        <select id="inCli" class="an-select"><option value="">Todas las clínicas</option>${f.clinics.map(v => `<option ${v === f.clinica ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')}</select>
-        <select id="inObra" class="an-select"><option value="">Todas las obras sociales</option>${f.obras.map(v => `<option ${v === f.obra ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')}</select>
-        <select id="inFrom" class="an-select"><option value="">Desde</option>${f.months.map(v => `<option value="${escapeAttr(v)}" ${v === f.from ? 'selected' : ''}>${escapeHtml(monthLabel(v))}</option>`).join('')}</select>
-        <select id="inTo" class="an-select"><option value="">Hasta</option>${f.months.map(v => `<option value="${escapeAttr(v)}" ${v === f.to ? 'selected' : ''}>${escapeHtml(monthLabel(v))}</option>`).join('')}</select>
-        <label class="stats-check"><input type="checkbox" id="inSplit" ${f.splitClinic ? 'checked' : ''}> Comparar clínicas</label>
-      </div>
-      <div class="stats-screens">
-        ${[['resumen', 'Resumen'], ['tiempos', 'Tiempos'], ['produccion', 'Facturación + vitrectomías']].map(([key, label]) => `<button class="stats-screen-btn ${f.screen === key ? 'active' : ''}" data-screen="${key}">${label}</button>`).join('')}
-      </div>`;
+  const statusFacturadoSinFecha = generalRows.filter(r => isFacturadoCompleto(r.estadoFac) && !fechaFacturadaReal(r)).length;
+  const fechaSinEstadoFacturado = generalRows.filter(r => fechaFacturadaReal(r) && !isFacturadoCompleto(r.estadoFac)).length;
+  const facturaAntesCirugia = billingRowsAll.filter(r => r.fechaCir && diffDays(fechaFacturadaReal(r), r.fechaCir) < 0).length;
+  const uniqueDetail = new Set(detailRows.map(personKey)).size;
+  const detailVit = detailRows.filter(hasVitrectomia).length;
+
+  const header = `<div class="stats-shell"><div class="stats-title-wrap"><div><div class="stats-title">Indicadores</div><div class="stats-subtitle">Operación, tiempos y facturación con filtros independientes y fechas reales.</div></div></div>${commonToolbar(f)}<div class="stats-screens">${[['resumen', 'Resumen'], ['tiempos', 'Tiempos'], ['produccion', 'Facturación + vitrectomías'], ['detalle', 'Detalle facturado']].map(([key, label]) => `<button class="stats-screen-btn ${f.screen === key ? 'active' : ''}" data-screen="${key}">${label}</button>`).join('')}</div>`;
 
   let body = '';
-
   if (f.screen === 'resumen') {
-    body = `
-      <div class="stats-mini-grid">
-        ${summaryCard('Pedir lente', stageCounts['PEDIR LENTE'] || 0)}
-        ${summaryCard('Esperando lente', stageCounts['ESPERANDO LENTE'] || 0)}
-        ${summaryCard('Llegó lente - programar', stageCounts['LLEGÓ LENTE - PROGRAMAR'] || 0)}
-        ${summaryCard('Fecha programada', stageCounts['FECHA PROGRAMADA'] || 0)}
-        ${summaryCard('Realizada - falta facturar', stageCounts['REALIZADA - FALTA FACTURAR'] || 0)}
-        ${summaryCard('Facturada', stageCounts['FACTURADA'] || 0, 'Cierre simple de episodio')}
-        ${summaryCard('Facturada falta otro ojo', stageCounts['FACTURADA FALTA OTRO OJO'] || 0)}
-        ${summaryCard('Finalizada', stageCounts['FINALIZADA'] || 0)}
-      </div>
-      <div class="stats-grid-2">
-        ${simpleBarsCard('Pedido → llegada por clínica', avgPedidoLlegadaByClinic, ' días', 'Promedio real calculado solo con casos que ya recibieron lente.')}
-        <section class="stats-card"><div class="stats-card-head"><div><h4>Embudo operativo</h4><p>Estados separados tal como se trabajan en la operatoria diaria.</p></div></div><div class="stage-list">
-          ${['PEDIR LENTE', 'ESPERANDO LENTE', 'LLEGÓ LENTE - PROGRAMAR', 'FECHA PROGRAMADA', 'REALIZADA - FALTA FACTURAR', 'FACTURADA', 'FACTURADA FALTA OTRO OJO', 'FINALIZADA'].map(k => `<div class="stage-row"><span>${escapeHtml(k)}</span><strong>${stageCounts[k] || 0}</strong></div>`).join('')}
-        </div></section>
-      </div>`;
+    body = `<div class="stats-mini-grid">${summaryCard('Pedir lente', stageCounts['PEDIR LENTE'] || 0)}${summaryCard('Esperando lente', stageCounts['ESPERANDO LENTE'] || 0)}${summaryCard('Llegó lente - programar', stageCounts['LLEGÓ LENTE - PROGRAMAR'] || 0)}${summaryCard('Fecha programada', stageCounts['FECHA PROGRAMADA'] || 0)}${summaryCard('Realizada - falta facturar', stageCounts['REALIZADA - FALTA FACTURAR'] || 0)}${summaryCard('Con fecha facturada real', billingRowsPeriod.length, 'Usa fechaFacturada o fechaFacturacion')}${summaryCard('Facturada sin fecha real', statusFacturadoSinFecha, 'Requiere revisión de calidad', statusFacturadoSinFecha ? 'warn' : 'ok')}</div><div class="stats-grid-2">${simpleBarsCard('Pedido → llegada por clínica', avgPedidoLlegadaByClinic, ' días', 'Promedio real calculado solo con casos que ya recibieron lente.')}<section class="stats-card"><div class="stats-card-head"><div><h4>Embudo operativo</h4><p>Estados separados tal como se trabajan en la operatoria diaria.</p></div></div><div class="stage-list">${['PEDIR LENTE', 'ESPERANDO LENTE', 'LLEGÓ LENTE - PROGRAMAR', 'FECHA PROGRAMADA', 'REALIZADA - FALTA FACTURAR', 'FACTURADA', 'FACTURADA FALTA OTRO OJO', 'FINALIZADA'].map(k => `<div class="stage-row"><span>${escapeHtml(k)}</span><strong>${stageCounts[k] || 0}</strong></div>`).join('')}</div></section></div>`;
   }
-
   if (f.screen === 'tiempos') {
-    body = `
-      <div class="stats-mini-grid">
-        ${summaryCard('Pedido → llegada', `${avg(pedidoALlegadaDone)} días`, 'Promedio real con lentes ya recibidas')}
-        ${summaryCard('Llegada → cirugía', `${avg(llegadaAFechaDone)} días`, 'Promedio real desde que llega la lente hasta la fecha quirúrgica')}
-        ${summaryCard('Cirugía → facturación', `${avg(cirugiaAFacturaDone)} días`, 'Promedio real con casos ya facturados')}
-        ${summaryCard('Espera abierta hoy', `${avg(waitingOpen)} días`, 'Solo pacientes que siguen esperando lente')}
-        ${summaryCard('Llegó y sigue sin fecha', `${avg(arrivedOpen)} días`, 'Pacientes con lente recibida y sin programación')}
-        ${summaryCard('Realizada y sin facturar', `${avg(billingOpen)} días`, 'Casos abiertos pendientes administrativos')}
-      </div>
-      <div class="stats-grid-2">
-        ${simpleBarsCard('Pedido → llegada por clínica', avgPedidoLlegadaByClinic, ' días', 'Sirve para auditar al proveedor y no depende del stock abierto.')}
-        ${simpleBarsCard('Llegada → cirugía por clínica', avgLlegadaCirugiaByClinic, ' días', 'Refleja la demora variable desde que el lente llega hasta la fecha quirúrgica.')}
-      </div>
-      <div class="stats-grid-2">
-        ${simpleBarsCard('Cirugía → facturación por clínica', avgCirugiaFacturaByClinic, ' días', 'Mide la velocidad del cierre administrativo.')}
-        <section class="stats-card"><div class="stats-card-head"><div><h4>Lectura rápida</h4><p>Separación entre tiempos reales completados y cuellos de botella todavía abiertos.</p></div></div><div class="stage-list">
-          <div class="stage-row"><span>Promedio pedido → llegada</span><strong>${avg(pedidoALlegadaDone)} días</strong></div>
-          <div class="stage-row"><span>Promedio llegada → cirugía</span><strong>${avg(llegadaAFechaDone)} días</strong></div>
-          <div class="stage-row"><span>Promedio cirugía → facturación</span><strong>${avg(cirugiaAFacturaDone)} días</strong></div>
-          <div class="stage-row"><span>Mediana espera abierta de lentes</span><strong>${median(waitingOpen)} días</strong></div>
-          <div class="stage-row"><span>Mediana sin fecha tras llegada</span><strong>${median(arrivedOpen)} días</strong></div>
-        </div></section>
-      </div>`;
+    body = `<div class="stats-mini-grid">${summaryCard('Pedido → llegada', `${avg(pedidoALlegadaDone)} días`, 'Promedio real con lentes ya recibidas')}${summaryCard('Llegada → cirugía', `${avg(llegadaAFechaDone)} días`, 'Promedio real hasta la fecha quirúrgica')}${summaryCard('Cirugía → facturación', `${avg(cirugiaAFacturaDone)} días`, 'Solo con fecha facturada real')}${summaryCard('Espera abierta hoy', `${avg(waitingOpen)} días`, 'Pacientes que siguen esperando lente')}${summaryCard('Llegó y sigue sin fecha', `${avg(arrivedOpen)} días`, 'Lente recibida sin programación')}${summaryCard('Realizada y sin facturar', `${avg(billingOpen)} días`, 'Pendientes administrativos')}</div><div class="stats-grid-2">${simpleBarsCard('Pedido → llegada por clínica', avgPedidoLlegadaByClinic, ' días', 'Sirve para auditar al proveedor.')}${simpleBarsCard('Llegada → cirugía por clínica', avgLlegadaCirugiaByClinic, ' días', 'Demora desde llegada del lente hasta cirugía.')}</div><div class="stats-grid-2">${simpleBarsCard('Cirugía → facturación por clínica', avgCirugiaFacturaByClinic, ' días', 'Solo toma fechas de facturación efectivamente cargadas.')}<section class="stats-card"><div class="stats-card-head"><div><h4>Medianas y calidad</h4><p>Complementa los promedios para evitar que casos extremos distorsionen la lectura.</p></div></div><div class="stage-list"><div class="stage-row"><span>Mediana pedido → llegada</span><strong>${median(pedidoALlegadaDone)} días</strong></div><div class="stage-row"><span>Mediana llegada → cirugía</span><strong>${median(llegadaAFechaDone)} días</strong></div><div class="stage-row"><span>Mediana cirugía → facturación</span><strong>${median(cirugiaAFacturaDone)} días</strong></div><div class="stage-row"><span>Facturas anteriores a cirugía</span><strong>${facturaAntesCirugia}</strong></div></div></section></div>`;
   }
-
   if (f.screen === 'produccion') {
-    body = `
-      <div class="stats-mini-grid">
-        ${summaryCard('Total facturadas', totalFact)}
-        ${summaryCard('Vitrectomías facturadas', totalVit)}
-        ${summaryCard('% vitrectomías / facturadas', `${pctVitTotal}%`)}
-        ${summaryCard(`Meta ${focusMonthLabel}`, `${targetMonth}`, 'Objetivo mensual de vitrectomías en el alcance visible')}
-        ${summaryCard(`Vitrectomías ${focusMonthLabel}`, `${vitCurrentMonth}`, 'Hecho acumulado del mes foco')}
-        ${summaryCard('Faltan para meta', `${faltanVitCurrent}`, faltanVitCurrent ? 'Restantes para llegar al objetivo mensual' : 'Meta alcanzada o superada', faltanVitCurrent ? 'warn' : 'ok')}
-      </div>
-      <div class="stats-grid-2">
-        ${barChartCard({ title: 'Cantidad de cirugías facturadas por mes', subtitle: 'Año-mes usando fecha de facturación real.', series: factMonthly })}
-        ${barChartCard({ title: 'Vitrectomías por mes', subtitle: 'Misma base mensual para leer junto con facturación total.', series: vitMonthly, targetLine: targetMonth, targetLabel: `Meta ${targetMonth}` })}
-      </div>
-      ${barChartCard({ title: '% vitrectomías sobre facturadas', subtitle: 'Participación mensual sobre el total facturado. Se lee mejor junto a los dos gráficos superiores.', series: vitPctMonthly, percent: true })}`;
+    body = `<div class="stats-mini-grid">${summaryCard('Total con fecha facturada', totalFact)}${summaryCard('Vitrectomías facturadas', totalVit)}${summaryCard('% vitrectomías / facturadas', `${pctVitTotal}%`)}${summaryCard(`Meta ${focusMonthLabel}`, targetMonth, 'Objetivo mensual visible')}${summaryCard(`Vitrectomías ${focusMonthLabel}`, vitCurrentMonth, 'Hecho acumulado')}${summaryCard('Faltan para meta', faltanVitCurrent, faltanVitCurrent ? 'Restantes para objetivo' : 'Meta alcanzada', faltanVitCurrent ? 'warn' : 'ok')}${summaryCard('Estado facturado sin fecha', statusFacturadoSinFecha, 'No entra en gráficos', statusFacturadoSinFecha ? 'warn' : 'ok')}${summaryCard('Fecha facturada sin estado', fechaSinEstadoFacturado, 'Revisar coherencia', fechaSinEstadoFacturado ? 'warn' : 'ok')}</div><div class="stats-grid-2">${barChartCard({ title: 'Cirugías con fecha facturada por mes', subtitle: 'Usa exclusivamente la fecha de facturación real.', series: factMonthly })}${barChartCard({ title: 'Vitrectomías por mes', subtitle: 'Cantidad facturada con vitrectomía.', series: vitMonthly, targetLine: targetMonth, targetLabel: `Meta ${targetMonth}` })}</div>${barChartCard({ title: '% vitrectomías sobre facturadas', subtitle: 'Participación mensual sobre registros con fecha facturada real.', series: vitPctMonthly, percent: true })}`;
+  }
+  if (f.screen === 'detalle') {
+    body = `<div class="stats-mini-grid">${summaryCard('Registros visibles', detailRows.length)}${summaryCard('Personas únicas', uniqueDetail, 'Identificadas principalmente por DNI')}${summaryCard('Con vitrectomía', detailVit)}${summaryCard('Sin vitrectomía', detailRows.length - detailVit)}${summaryCard('Facturadas sin fecha real', statusFacturadoSinFecha, 'No aparecen en esta tabla', statusFacturadoSinFecha ? 'warn' : 'ok')}</div>${detailTable(detailRows)}`;
   }
 
   view.innerHTML = `${header}${body}</div>`;
 
-  const bind = () => {
-    saveFilters({
-      ...f,
-      clinica: document.getElementById('inCli')?.value || '',
-      obra: document.getElementById('inObra')?.value || '',
-      from: document.getElementById('inFrom')?.value || '',
-      to: document.getElementById('inTo')?.value || '',
-      splitClinic: !!document.getElementById('inSplit')?.checked,
-      screen: f.screen
-    });
-    renderEstadisticas();
-  };
-
-  ['inCli', 'inObra', 'inFrom', 'inTo', 'inSplit'].forEach(id => {
-    document.getElementById(id)?.addEventListener('change', bind);
+  const collect = () => ({
+    ...f,
+    clinica: document.getElementById('inCli')?.value || '',
+    obra: document.getElementById('inObra')?.value || '',
+    fromMonth: document.getElementById('inFrom')?.value ?? f.fromMonth,
+    toMonth: document.getElementById('inTo')?.value ?? f.toMonth,
+    splitClinic: document.getElementById('inSplit')?.checked ?? f.splitClinic,
+    detailFrom: document.getElementById('inDetailFrom')?.value ?? f.detailFrom,
+    detailTo: document.getElementById('inDetailTo')?.value ?? f.detailTo,
+    detailVit: document.getElementById('inDetailVit')?.value ?? f.detailVit,
+    detailSearch: document.getElementById('inDetailSearch')?.value ?? f.detailSearch
   });
-  view.querySelectorAll('[data-screen]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      saveFilters({ ...f, screen: btn.dataset.screen || 'resumen' });
-      renderEstadisticas();
-    });
+  const rerender = () => { saveFilters(collect()); renderEstadisticas(); };
+
+  ['inCli', 'inObra', 'inFrom', 'inTo', 'inSplit', 'inDetailFrom', 'inDetailTo', 'inDetailVit'].forEach(id => document.getElementById(id)?.addEventListener('change', rerender));
+  const search = document.getElementById('inDetailSearch');
+  search?.addEventListener('input', () => {
+    clearTimeout(window.__statsDetailSearchTimer);
+    window.__statsDetailSearchTimer = setTimeout(rerender, 350);
+  });
+  document.getElementById('inClearGeneral')?.addEventListener('click', () => {
+    const next = { ...f, clinica: '', obra: '' };
+    if (f.screen !== 'detalle') {
+      next.fromMonth = f.months[0] || '';
+      next.toMonth = f.months[f.months.length - 1] || '';
+      next.splitClinic = false;
+    }
+    saveFilters(next); renderEstadisticas();
+  });
+  view.querySelectorAll('[data-screen]').forEach(btn => btn.addEventListener('click', () => { saveFilters({ ...collect(), screen: btn.dataset.screen || 'resumen' }); renderEstadisticas(); }));
+  view.querySelectorAll('[data-detail-preset]').forEach(btn => btn.addEventListener('click', () => {
+    const next = collect();
+    const preset = btn.dataset.detailPreset;
+    if (preset === 'today') next.detailFrom = next.detailTo = hoyISO();
+    else if (preset === 'month') Object.assign(next, { detailFrom: monthRange(0).from, detailTo: monthRange(0).to });
+    else if (preset === 'previous') Object.assign(next, { detailFrom: monthRange(-1).from, detailTo: monthRange(-1).to });
+    else Object.assign(next, { detailFrom: '', detailTo: '' });
+    saveFilters(next); renderEstadisticas();
+  }));
+  view.querySelectorAll('[data-open-detail-row]').forEach(btn => btn.addEventListener('click', () => window.openSide?.(btn.dataset.openDetailRow)));
+  document.getElementById('btnExportDetail')?.addEventListener('click', () => {
+    const headers = ['Fecha facturada', 'Paciente', 'DNI', 'Afiliado', 'Obra social', 'Clínica', 'Ojo', 'Fecha cirugía', 'Vitrectomía', 'Estado'];
+    const lines = [headers, ...detailRows.map(r => [fechaFacturadaReal(r), r.nombre, r.dni, r.afiliado, r.obraSocial, r.clinica, r.ojo, fechaISO(r.fechaCir), hasVitrectomia(r) ? 'Sí' : 'No', stageOf(r)])];
+    const csv = '\ufeff' + lines.map(row => row.map(csvCell).join(';')).join('\r\n');
+    downloadTextFile(`detalle_facturado_${hoyISO()}.csv`, csv, 'text/csv;charset=utf-8');
+    toast(`✓ Descargados ${detailRows.length} registros facturados`);
   });
 }
