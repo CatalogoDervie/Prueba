@@ -272,6 +272,12 @@ export function secondEyeMissing(p) {
   return other ? '' : otro;
 }
 
+export function isSecondEyeBlockedByBilling(p) {
+  if (!p || p.ojos !== '2 ojos' || isFacturadoCompleto(p.estadoFac)) return false;
+  const other = getOtherEyeRow(p);
+  return !!other && !isFacturadoCompleto(other.estadoFac);
+}
+
 function faltanteSegundoOjo(p) {
   if (p.ojos !== '2 ojos') return '';
   const otro = p.ojo === 'OD' ? 'OI' : 'OD';
