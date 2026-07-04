@@ -9,7 +9,8 @@ import {
   hideFinalizadasSinAccion, setHideFinalizadasSinAccion,
   SETTINGS, ALERT_SILENCES, findRow, normalizeId,
   estado, alertas, secondEyeMissing, isFacturadoCompleto, getDioptria,
-  silenciarAlerta, reactivarAlerta, backupDiario, normalizarData, validarFila, filtered
+  silenciarAlerta, reactivarAlerta, backupDiario, normalizarData, validarFila, filtered,
+  isSecondEyeBlockedByBilling
 } from './state.js';
 import {
   render, renderTabla, renderStats, renderAlerts, refreshSidePanel,
@@ -228,6 +229,10 @@ async function upd(id, field, val) {
 async function duplicarPaciente(id) {
   const orig = findRow(id);
   if (!orig) return;
+  if (!isFacturadoCompleto(orig.estadoFac)) {
+    toast('Para cargar el segundo ojo, primero facturá/finalizá el ojo actual.');
+    return;
+  }
   const otroOjo = orig.ojo === 'OD' ? 'OI' : 'OD';
   const yaExiste = DB.rows.some(x => x.id !== orig.id && String(x.dni || '').trim() === String(orig.dni || '').trim() && x.ojo === otroOjo);
   if (yaExiste) { toast(`Ya existe episodio para ${otroOjo}`); return; }
@@ -240,8 +245,21 @@ async function duplicarPaciente(id) {
   copia.fechaLlegaLente = '';
   copia.recepLente = '';
   copia.fechaCir = '';
+  copia.hora = '';
+  copia.hora_cirugia = '';
   copia.estadoCir = '';
   copia.estadoFac = '';
+  copia.fechaFacturada = '';
+  copia.fechaFacturacion = '';
+  copia.facturarSeleccionado = false;
+  copia.extraSutura = false;
+  copia.extraInyeccion = false;
+  copia.extraVitrectomia = false;
+  copia.vitrectomia = false;
+  if (copia.extras && typeof copia.extras === 'object') copia.extras = { ...copia.extras, vitrectomia: false };
+  copia.ecografiaImagen = '';
+  copia.ecografiaMes = '';
+  copia.fechaCarga = hoyISO();
   copia.notas = `Copia de ${orig.nombre} — ${orig.ojo} → ${copia.ojo}`;
   DB.rows.push(copia);
   await save(copia);
@@ -445,7 +463,7 @@ function exportarFiltradoExcel() {
 function exportarListos() {
   if (!canExport()) { toast('No tenés permisos para exportar'); return; }
   import('./state.js').then(({ DB: db, estado: est }) => {
-    const listos = db.rows.filter(p => est(p) === 'PEDIR LENTE');
+    const listos = db.rows.filter(p => est(p) === 'PEDIR LENTE' && !isSecondEyeBlockedByBilling(p));
     if (!listos.length) { toast('No hay pacientes listos para pedir lente'); return; }
     const headers = ['Nombre', 'DNI', 'Obra social', 'N° afiliado', 'Clínica', 'Ojo', 'Dioptría'];
     const rows = listos.map(p => [p.nombre, p.dni, p.obraSocial, p.afiliado || '', p.clinica, p.ojo, getDioptria(p)]);
@@ -873,7 +891,7 @@ function toExcelFile(filename, headers, rows) {
 }
 
 function buildTSVListos() {
-  const listos = DB.rows.filter(p => estado(p) === 'PEDIR LENTE');
+  const listos = DB.rows.filter(p => estado(p) === 'PEDIR LENTE' && !isSecondEyeBlockedByBilling(p));
   return 'clinica\tnombre\tdni\tobra_social\tafiliado\tojo\tdioptria\n' +
     listos.map(p => [p.clinica, p.nombre, p.dni, p.obraSocial, p.afiliado || '', p.ojo, getDioptria(p)].join('\t')).join('\n');
 }
@@ -883,7 +901,7 @@ function copyExcel() {
 }
 
 function downloadExcelListos() {
-  const listos = DB.rows.filter(p => estado(p) === 'PEDIR LENTE');
+  const listos = DB.rows.filter(p => estado(p) === 'PEDIR LENTE' && !isSecondEyeBlockedByBilling(p));
   toExcelFile('listos_lente.xlsx', ['Clínica','Nombre','DNI','O. Social','N° Afiliado','Ojo','Dioptría'], listos.map(p => [p.clinica, p.nombre, p.dni, p.obraSocial, p.afiliado || '', p.ojo, getDioptria(p)]));
   toast('Excel descargado');
 }

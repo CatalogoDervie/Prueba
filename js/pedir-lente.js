@@ -1,6 +1,6 @@
 'use strict';
 
-import { estado, getDioptria, filtered, WORKFLOW_KEYS, stateKey } from './state.js';
+import { estado, getDioptria, filtered, WORKFLOW_KEYS, stateKey, isSecondEyeBlockedByBilling } from './state.js';
 import { escapeHtml, escapeAttr, toast, cleanDigits } from './utils.js';
 import { connectorStartJob, connectorPollJob, renderJobStatus } from './connector.js';
 import { loadLentessEntregas, entregaForClinica } from './admision-config.js';
@@ -14,7 +14,12 @@ function getModuleFilter() {
 }
 function setModuleFilter(v) { localStorage.setItem(KEY, v); }
 function baseRows() {
-  return filtered({ includeQuickFilter: false, includeEstadoSelect: false, stateKeys: [WORKFLOW_KEYS.PEDIR_LENTE, WORKFLOW_KEYS.ESPERANDO_LENTE, WORKFLOW_KEYS.LLEGO_LENTE_PROGRAMAR] });
+  return filtered({
+    includeQuickFilter: false,
+    includeEstadoSelect: false,
+    stateKeys: [WORKFLOW_KEYS.PEDIR_LENTE, WORKFLOW_KEYS.ESPERANDO_LENTE, WORKFLOW_KEYS.LLEGO_LENTE_PROGRAMAR],
+    customPredicate: p => !isSecondEyeBlockedByBilling(p)
+  });
 }
 function rowsFor(filterKey) { const rows = baseRows(); return filterKey === 'ALL' ? rows : rows.filter(p => stateKey(p) === filterKey); }
 function badgeFor(filterKey) { if (filterKey === WORKFLOW_KEYS.PEDIR_LENTE) return 'b2'; if (filterKey === WORKFLOW_KEYS.ESPERANDO_LENTE) return 'b3'; if (filterKey === WORKFLOW_KEYS.LLEGO_LENTE_PROGRAMAR) return 'b4'; return 'b3'; }
