@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simulador PREQUIRÚRGICOS OK</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./css/prequirurgicos.css">
+</head>
+<body>
+  <section id="loginScreen" class="login-screen">
+    <form id="loginForm" class="login-card">
+      <div class="eyebrow">Clínica</div>
+      <h1>Simulador PREQUIRÚRGICOS OK</h1>
+      <p>Usá las mismas credenciales del Control de Cirugías.</p>
+      <label>Correo electrónico
+        <input id="loginEmail" type="email" autocomplete="username" placeholder="usuario@correo.com">
+      </label>
+      <label>Contraseña
+        <input id="loginPass" type="password" autocomplete="current-password" placeholder="••••••••">
+      </label>
+      <div id="loginError" class="error-box" hidden></div>
+      <button id="loginBtn" class="btn primary" type="submit">Ingresar</button>
+    </form>
+  </section>
+
+  <div id="app" hidden>
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">Simulación paralela · Agosto 2026</div>
+        <h1>PREQUIRÚRGICOS OK</h1>
+        <p>Lee pacientes reales. Los cambios de esta pantalla no modifican el circuito operativo.</p>
+      </div>
+      <div class="top-actions">
+        <span id="userBadge" class="user-badge"></span>
+        <a class="btn" href="./index.html">Abrir sistema actual</a>
+        <button id="logoutBtn" class="btn" type="button">Salir</button>
+      </div>
+    </header>
+
+    <main class="page">
+      <section class="notice">
+        <strong>Modo simulación.</strong>
+        La fecha y hora de ingreso a la cola quedan fijas. El cupo es único para CDU y Gualeguaychú y se consume por ojo/cirugía.
+        <span id="vigenciaText"></span>
+      </section>
+
+      <section class="toolbar card">
+        <div class="field">
+          <label for="monthSelect">Mes de trabajo</label>
+          <input id="monthSelect" type="month" value="2026-08">
+        </div>
+        <div class="field compact">
+          <label for="quotaInput">Cupo mensual</label>
+          <input id="quotaInput" type="number" min="0" step="1" value="0">
+        </div>
+        <button id="saveQuotaBtn" class="btn primary" type="button">Guardar cupo</button>
+        <div class="spacer"></div>
+        <button id="openAddBtn" class="btn success" type="button">+ Registrar prequirúrgico completo</button>
+      </section>
+
+      <section id="kpis" class="kpi-grid"></section>
+
+      <section class="card filters">
+        <div class="field grow">
+          <label for="searchInput">Buscar en la cola</label>
+          <input id="searchInput" type="search" placeholder="Paciente, DNI o afiliado">
+        </div>
+        <div class="field">
+          <label for="clinicFilter">Clínica</label>
+          <select id="clinicFilter">
+            <option value="">Ambas clínicas</option>
+            <option value="CDU">CDU</option>
+            <option value="Gualeguaychú">Gualeguaychú</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="statusFilter">Estado simulado</label>
+          <select id="statusFilter">
+            <option value="">Todos</option>
+            <option value="PREQUIRURGICOS_OK">PREQUIRÚRGICOS OK</option>
+            <option value="A_PEDIR_LENTE">A PEDIR LENTE</option>
+            <option value="LENTE_PEDIDA">LENTE PEDIDA</option>
+            <option value="LENTE_RECIBIDA">LENTE RECIBIDA</option>
+            <option value="HABILITADO_PROGRAMAR">HABILITADO PARA PROGRAMAR</option>
+          </select>
+        </div>
+        <button id="clearFiltersBtn" class="btn" type="button">Limpiar</button>
+      </section>
+
+      <section class="card bulk-bar">
+        <div>
+          <strong id="selectedText">0 seleccionados</strong>
+          <span>Solo se permite asignar cupo respetando el orden FIFO.</span>
+        </div>
+        <button id="assignQuotaBtn" class="btn primary" type="button" disabled>Pasar a pedir lente</button>
+      </section>
+
+      <section class="card table-card">
+        <div class="table-head">
+          <div>
+            <h2>Cola única</h2>
+            <p>Ordenada por fecha y hora de presentación del prequirúrgico.</p>
+          </div>
+          <button id="exportBtn" class="btn" type="button">Descargar CSV</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="check-col"></th>
+                <th>#</th>
+                <th>Ingreso</th>
+                <th>Paciente</th>
+                <th>Clínica</th>
+                <th>Ojo</th>
+                <th>Estado real</th>
+                <th>Cirugía real</th>
+                <th>Estado simulado</th>
+                <th>Mes cupo</th>
+                <th>Llegada estimada</th>
+                <th>Acción</th>
+              </tr>
+            </thead>
+            <tbody id="queueBody"></tbody>
+          </table>
+        </div>
+        <div id="emptyState" class="empty" hidden>No hay pacientes en la cola para estos filtros.</div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="addDialog">
+    <form method="dialog" class="dialog-card">
+      <div class="dialog-head">
+        <div>
+          <div class="eyebrow">Nuevo ingreso</div>
+          <h2>Registrar prequirúrgico completo</h2>
+          <p>Se toma el paciente desde la misma base del sistema actual.</p>
+        </div>
+        <button class="icon-btn" value="cancel" aria-label="Cerrar">×</button>
+      </div>
+      <label>Buscar paciente PAMI
+        <input id="candidateSearch" type="search" placeholder="Nombre, DNI o afiliado">
+      </label>
+      <div id="candidateList" class="candidate-list"></div>
+      <div class="dialog-actions">
+        <button class="btn" value="cancel">Cerrar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="./js/firebase.js"></script>
+  <script type="module" src="./js/prequirurgicos.js"></script>
+</body>
+</html>
