@@ -1,5 +1,7 @@
 'use strict';
 
+import './episodios-ojos.js';
+
 // authz.js — helpers de permisos de interfaz.
 // MODO ACTUAL TEMPORAL: permisos de página desactivados para priorizar funcionamiento.
 // Todos los módulos y acciones quedan habilitados para cualquier usuario logueado/activo.
