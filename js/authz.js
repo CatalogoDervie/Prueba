@@ -1,6 +1,7 @@
 'use strict';
 
 import './episodios-ojos.js';
+import './excel-fechas-local.js';
 
 // authz.js — helpers de permisos de interfaz.
 // MODO ACTUAL TEMPORAL: permisos de página desactivados para priorizar funcionamiento.
