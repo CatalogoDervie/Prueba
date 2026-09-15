@@ -47,7 +47,7 @@ function limpiarFiltrosPersistidosObsoletos() {
     delete saved.fFechaCir;
     delete saved.fEst;
     localStorage.setItem(SAVED_FILTERS_KEY, JSON.stringify(saved));
-  } catch (_) { /* configuración inválida: la app la recreará */ }
+  } catch (_) { }
 }
 
 function limpiarEstadoOculto() {
@@ -56,8 +56,7 @@ function limpiarEstadoOculto() {
 }
 
 function dispatchChange(el) {
-  if (!el) return;
-  el.dispatchEvent(new Event('change', { bubbles: true }));
+  if (el) el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 function limpiarFechaCirugia(renderizar = true) {
@@ -81,7 +80,6 @@ function asegurarAyudasFecha() {
   const label = input?.closest('label');
   if (!input || !label || label.dataset.dateFilterEnhanced === '1') return;
   label.dataset.dateFilterEnhanced = '1';
-
   const textNode = Array.from(label.childNodes).find(n => n.nodeType === Node.TEXT_NODE);
   if (textNode) textNode.textContent = 'Fecha de cirugía ';
 
@@ -98,8 +96,8 @@ function asegurarAyudasFecha() {
   wrap.addEventListener('click', e => {
     const btn = e.target.closest('[data-date-preset]');
     if (!btn) return;
-    const preset = btn.dataset.datePreset;
-    input.value = preset === 'today' ? hoyISO() : preset === 'tomorrow' ? sumarDiasISO(hoyISO(), 1) : '';
+    input.value = btn.dataset.datePreset === 'today' ? hoyISO()
+      : btn.dataset.datePreset === 'tomorrow' ? sumarDiasISO(hoyISO(), 1) : '';
     dispatchChange(input);
   });
 }
@@ -107,18 +105,14 @@ function asegurarAyudasFecha() {
 function asegurarCheckbox() {
   let filtro = document.getElementById(ID_FILTRO);
   if (filtro) return filtro;
-
   const contenedor = document.querySelector('.advanced-filters-body');
   if (!contenedor) return null;
-
   const label = document.createElement('label');
   label.className = 'filter-label';
   label.innerHTML = `<input type="checkbox" id="${ID_FILTRO}"> Solo vitrectomía`;
-
   const fechaProgramada = document.getElementById('fFechaCir')?.closest('label');
   if (fechaProgramada?.parentNode === contenedor) fechaProgramada.insertAdjacentElement('afterend', label);
-  else contenedor.insertBefore(label, contenedor.querySelector('#showSilenced')?.closest('label') || null);
-
+  else contenedor.appendChild(label);
   return document.getElementById(ID_FILTRO);
 }
 
@@ -138,7 +132,6 @@ function aplicarVitrectomia() {
   if (!filtro || !tbody) return;
   const usarFiltro = filtro.checked;
   let visibles = 0;
-
   tbody.querySelectorAll('tr[data-row-click]').forEach(tr => {
     const paciente = buscarPaciente(tr.dataset.rowClick);
     const mostrar = !usarFiltro || esCasoVitrectomia(paciente);
@@ -146,7 +139,6 @@ function aplicarVitrectomia() {
     if (mostrar) visibles += 1;
     if (usarFiltro && mostrar) mostrarFechaFacturacion(tr, paciente);
   });
-
   if (usarFiltro) {
     const tag = Array.from(document.querySelectorAll('.table-topbar .table-tag')).find(el => /visibles/i.test(el.textContent || ''));
     if (tag) tag.textContent = `${visibles} visibles`;
@@ -159,14 +151,9 @@ function asegurarChipFechaVisible() {
   const bar = document.getElementById('activeFiltersBar');
   const input = document.getElementById('fFechaCir');
   if (!bar || !input) return;
-
   const existente = bar.querySelector('[data-clear-surgery-date]');
-  if (!input.value) {
-    existente?.remove();
-    return;
-  }
+  if (!input.value) { existente?.remove(); return; }
   if (existente) return;
-
   pintandoChip = true;
   bar.querySelector('.af-chip-soft')?.remove();
   const chip = document.createElement('button');
@@ -181,7 +168,7 @@ function asegurarChipFechaVisible() {
   pintandoChip = false;
 }
 
-// ── Ajustes solicitados de interfaz ───────────────────────────────────────
+// ── Menú principal / descargas ────────────────────────────────────────────
 function aplicarAjustesInterfaz() {
   const limpiar = document.getElementById('btnLimpiarFiltros');
   if (limpiar) limpiar.textContent = 'Borrar filtros';
@@ -189,8 +176,18 @@ function aplicarAjustesInterfaz() {
   const more = document.getElementById('moreMenu');
   const summary = more?.querySelector('summary');
   const list = more?.querySelector('.more-menu-list');
-  if (summary) summary.textContent = 'Descargar Excel ▾';
+  const refineSecondary = document.querySelector('.refine-secondary');
+  const btnConector = document.getElementById('btnConfigurarURL');
 
+  // Mover primero el conector fuera del menú de descargas para no eliminarlo.
+  if (btnConector && refineSecondary && btnConector.parentElement !== refineSecondary) {
+    btnConector.textContent = '⚙ Conector';
+    btnConector.title = 'Configurar conector';
+    if (more?.parentElement === refineSecondary) refineSecondary.insertBefore(btnConector, more);
+    else refineSecondary.appendChild(btnConector);
+  }
+
+  if (summary) summary.textContent = 'Descargar Excel ▾';
   const btnVista = document.getElementById('btnExportarVista');
   const btnBackup = document.getElementById('btnBackup');
   const btnDia = document.getElementById('btnExportarDia');
@@ -204,37 +201,27 @@ function aplicarAjustesInterfaz() {
     Array.from(list.querySelectorAll('button, hr')).forEach(el => {
       if (el.tagName === 'HR' || !permitidos.has(el.id)) el.remove();
     });
-  }
-
-  const btnConector = document.getElementById('btnConfigurarURL');
-  const refineSecondary = document.querySelector('.refine-secondary');
-  if (btnConector && refineSecondary && btnConector.parentElement !== refineSecondary) {
-    btnConector.textContent = '⚙ Conector';
-    btnConector.title = 'Configurar conector';
-    if (more?.parentElement === refineSecondary) refineSecondary.insertBefore(btnConector, more);
-    else refineSecondary.appendChild(btnConector);
+    [btnVista, btnBackup, btnDia].forEach(btn => { if (btn) list.appendChild(btn); });
   }
 
   const ayuda = document.querySelector('.advanced-help');
-  if (ayuda && /Tableros/i.test(ayuda.textContent || '')) {
-    ayuda.textContent = 'Usá estos filtros solo cuando quieras afinar la operación diaria.';
-  }
+  if (ayuda && /Tableros/i.test(ayuda.textContent || '')) ayuda.textContent = 'Usá estos filtros solo cuando quieras afinar la operación diaria.';
 }
 
-// ── Dioptrías de ambos ojos y primer ojo explícito ────────────────────────
+// ── Primer ojo + dioptrías de ambos ojos ──────────────────────────────────
 function mejorarCamposOjos() {
   const sideBody = document.getElementById('sideBody');
   if (!sideBody) return;
-  const grupos = Array.from(sideBody.querySelectorAll('.sgroup'));
-  const grupo = grupos.find(g => (g.querySelector('.sgroup-title')?.textContent || '').trim() === 'Cirugía');
+  const grupo = Array.from(sideBody.querySelectorAll('.sgroup'))
+    .find(g => (g.querySelector('.sgroup-title')?.textContent || '').trim() === 'Cirugía');
   if (!grupo || grupo.dataset.eyeFieldsEnhanced === '1') return;
 
   const ojosSel = grupo.querySelector('select[data-field="ojos"]');
   const ojoSel = grupo.querySelector('select[data-field="ojo"]');
   const dioptriaInput = grupo.querySelector('input[data-field="dioptria"]');
   if (!ojosSel || !ojoSel || !dioptriaInput) return;
-
   grupo.dataset.eyeFieldsEnhanced = '1';
+
   const id = ojoSel.dataset.rowId || dioptriaInput.dataset.rowId || '';
   const paciente = buscarPaciente(id) || {};
   const filaOjo = ojoSel.closest('.srow');
@@ -243,13 +230,8 @@ function mejorarCamposOjos() {
 
   Array.from(ojoSel.options).forEach(opt => {
     const o = normalizarOjo(opt.value || opt.textContent);
-    if (o === 'OI') {
-      opt.value = 'OI';
-      opt.textContent = 'OI — Izquierdo (habitual)';
-    } else if (o === 'OD') {
-      opt.value = 'OD';
-      opt.textContent = 'OD — Derecho';
-    }
+    if (o === 'OI') { opt.value = 'OI'; opt.textContent = 'OI — Izquierdo (habitual)'; }
+    if (o === 'OD') { opt.value = 'OD'; opt.textContent = 'OD — Derecho'; }
   });
   if (!normalizarOjo(ojoSel.value)) ojoSel.value = 'OI';
 
@@ -281,24 +263,28 @@ function mejorarCamposOjos() {
   filaOD.insertAdjacentElement('afterend', ayuda);
 
   const secondLabel = filaSegundo.querySelector('[data-second-eye-label]');
+  const actualizarDuplicar = () => {
+    const btn = document.querySelector('#sideFoot [data-qa-action="duplicar"]');
+    if (!btn) return;
+    const otro = normalizarOjo(ojoSel.value) === 'OD' ? 'OI' : 'OD';
+    btn.textContent = `⧉ Duplicar segundo ojo → ${otro}`;
+  };
 
-  const sincronizarDioptriaActual = () => {
+  const sincronizarDioptriaActual = (emitir = true) => {
     if (ojosSel.value !== '2 ojos') return;
     const ojo = normalizarOjo(ojoSel.value) || 'OI';
     dioptriaInput.value = ojo === 'OD' ? odInput.value : oiInput.value;
-    dispatchChange(dioptriaInput);
+    if (emitir) dispatchChange(dioptriaInput);
     if (secondLabel) secondLabel.textContent = ojo === 'OD' ? 'OI — Izquierdo' : 'OD — Derecho';
+    actualizarDuplicar();
   };
 
-  const aplicarModo = () => {
+  const aplicarModo = (emitir = false) => {
     const dosOjos = ojosSel.value === '2 ojos';
     if (labelOjo) labelOjo.textContent = dosOjos ? 'Primer ojo a operar' : 'Ojo a operar';
     if (filaDioptria) filaDioptria.style.display = dosOjos ? 'none' : '';
     [filaSegundo, filaOI, filaOD, ayuda].forEach(el => { el.style.display = dosOjos ? '' : 'none'; });
-    if (dosOjos) {
-      if (!normalizarOjo(ojoSel.value)) ojoSel.value = 'OI';
-      sincronizarDioptriaActual();
-    }
+    if (dosOjos) sincronizarDioptriaActual(emitir);
   };
 
   ojoSel.addEventListener('change', () => {
@@ -307,14 +293,14 @@ function mejorarCamposOjos() {
       const seguro = window.confirm('¿Está seguro de que quiere que se opere primero el OD?');
       if (!seguro) ojoSel.value = 'OI';
     }
-    sincronizarDioptriaActual();
+    sincronizarDioptriaActual(true);
   });
 
   oiInput.addEventListener('change', () => {
-    if (ojosSel.value === '2 ojos' && normalizarOjo(ojoSel.value) === 'OI') sincronizarDioptriaActual();
+    if (ojosSel.value === '2 ojos' && normalizarOjo(ojoSel.value) === 'OI') sincronizarDioptriaActual(true);
   });
   odInput.addEventListener('change', () => {
-    if (ojosSel.value === '2 ojos' && normalizarOjo(ojoSel.value) === 'OD') sincronizarDioptriaActual();
+    if (ojosSel.value === '2 ojos' && normalizarOjo(ojoSel.value) === 'OD') sincronizarDioptriaActual(true);
   });
 
   ojosSel.addEventListener('change', () => {
@@ -331,17 +317,10 @@ function mejorarCamposOjos() {
         }
       }
     }
-    aplicarModo();
+    aplicarModo(true);
   });
 
-  const duplicarBtn = document.querySelector(`#sideFoot [data-qa-action="duplicar"][data-qa-id="${CSS.escape(id)}"]`)
-    || document.querySelector('#sideFoot [data-qa-action="duplicar"]');
-  if (duplicarBtn) {
-    const otro = normalizarOjo(ojoSel.value) === 'OD' ? 'OI' : 'OD';
-    duplicarBtn.textContent = `⧉ Duplicar segundo ojo → ${otro}`;
-  }
-
-  aplicarModo();
+  aplicarModo(false);
 }
 
 async function duplicarSegundoOjo(id) {
@@ -352,7 +331,7 @@ async function duplicarSegundoOjo(id) {
     return;
   }
   const dirty = document.getElementById('sideDirtyHint');
-  if (dirty && dirty.style.display !== 'none') {
+  if (dirty && getComputedStyle(dirty).display !== 'none') {
     toast('Guardá los cambios antes de duplicar el segundo ojo.');
     return;
   }
@@ -362,10 +341,7 @@ async function duplicarSegundoOjo(id) {
   const yaExiste = DB.rows.some(x => normalizeId(x.id) !== normalizeId(orig.id)
     && String(x.dni || '').trim() === String(orig.dni || '').trim()
     && normalizarOjo(x.ojo) === otroOjo);
-  if (yaExiste) {
-    toast(`Ya existe episodio para ${otroOjo}`);
-    return;
-  }
+  if (yaExiste) { toast(`Ya existe episodio para ${otroOjo}`); return; }
 
   if (ojoOriginal === 'OI' && !orig.dioptriaOI) orig.dioptriaOI = String(orig.dioptria || orig.lio || '').trim();
   if (ojoOriginal === 'OD' && !orig.dioptriaOD) orig.dioptriaOD = String(orig.dioptria || orig.lio || '').trim();
@@ -374,48 +350,19 @@ async function duplicarSegundoOjo(id) {
 
   const copia = {
     id: String(DB.nid++),
-    clinica: orig.clinica || 'CDU',
-    nombre: orig.nombre || '',
-    dni: orig.dni || '',
-    fnac: orig.fnac || '',
-    tel: orig.tel || '',
-    dir: orig.dir || '',
-    obraSocial: orig.obraSocial || 'PAMI',
-    afiliado: orig.afiliado || '',
-    ojos: '2 ojos',
-    ojo: otroOjo,
-    dioptria: dioptriaSegundo,
-    lio: dioptriaSegundo,
-    dioptriaOI: orig.dioptriaOI || '',
-    dioptriaOD: orig.dioptriaOD || '',
-    model: orig.model || '',
-    precioEspecial: orig.precioEspecial || '',
-    fechaSolLente: '',
-    fechaLlegaLente: '',
-    recepLente: '',
-    fechaCir: '',
-    hora: '',
-    hora_cirugia: '',
-    estadoCir: '',
-    estadoFac: '',
-    fechaFacturada: '',
-    fechaFacturacion: '',
-    facturarSeleccionado: false,
-    extraSutura: false,
-    extraInyeccion: false,
-    extraVitrectomia: false,
-    vitrectomia: false,
-    ecografiaImagen: '',
-    ecografiaMes: '',
-    fechaCarga: hoyISO(),
+    clinica: orig.clinica || 'CDU', nombre: orig.nombre || '', dni: orig.dni || '', fnac: orig.fnac || '',
+    tel: orig.tel || '', dir: orig.dir || '', obraSocial: orig.obraSocial || 'PAMI', afiliado: orig.afiliado || '',
+    ojos: '2 ojos', ojo: otroOjo, dioptria: dioptriaSegundo, lio: dioptriaSegundo,
+    dioptriaOI: orig.dioptriaOI || '', dioptriaOD: orig.dioptriaOD || '',
+    model: orig.model || '', precioEspecial: orig.precioEspecial || '',
+    fechaSolLente: '', fechaLlegaLente: '', recepLente: '', fechaCir: '', hora: '', hora_cirugia: '',
+    estadoCir: '', estadoFac: '', fechaFacturada: '', fechaFacturacion: '', facturarSeleccionado: false,
+    extraSutura: false, extraInyeccion: false, extraVitrectomia: false, vitrectomia: false,
+    ecografiaImagen: '', ecografiaMes: '', fechaCarga: hoyISO(),
     notas: `Segundo ojo duplicado desde ${ojoOriginal} → ${otroOjo}`
   };
 
-  const [{ save }, { render }] = await Promise.all([
-    import('./firebase-ui.js'),
-    import('./render.js')
-  ]);
-
+  const [{ save }, { render }] = await Promise.all([import('./firebase-ui.js'), import('./render.js')]);
   DB.rows.push(copia);
   await save(orig);
   await save(copia);
@@ -427,18 +374,14 @@ async function duplicarSegundoOjo(id) {
     : `✓ Segundo ojo ${otroOjo} creado. Falta cargar su dioptría.`);
 }
 
-// ── Excel de cirugías programadas: una fecha + Tabla de Excel real ───────
+// ── XLSX como Tabla de Excel real ─────────────────────────────────────────
 function xlsxEscapeXml(v) {
   return String(v ?? '').replace(/[&<>\"]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[m]));
 }
 
 function xlsxColName(n) {
   let s = '';
-  while (n > 0) {
-    const m = (n - 1) % 26;
-    s = String.fromCharCode(65 + m) + s;
-    n = Math.floor((n - 1) / 26);
-  }
+  while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
   return s;
 }
 
@@ -460,23 +403,18 @@ function crc32(str) {
   for (const b of bytes) c = table[(c ^ b) & 0xff] ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
 }
-
 function u16(n) { return [n & 255, (n >>> 8) & 255]; }
 function u32(n) { return [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255]; }
 function bytesOf(str) { return Array.from(new TextEncoder().encode(str)); }
 
 function makeZip(files) {
-  const localParts = [];
-  const centralParts = [];
+  const localParts = [], centralParts = [];
   let offset = 0;
   files.forEach(file => {
-    const name = bytesOf(file.name);
-    const data = bytesOf(file.content);
-    const crc = crc32(file.content);
+    const name = bytesOf(file.name), data = bytesOf(file.content), crc = crc32(file.content);
     const local = [0x50,0x4b,0x03,0x04, ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...name, ...data];
     localParts.push(...local);
-    const central = [0x50,0x4b,0x01,0x02, ...u16(20), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset), ...name];
-    centralParts.push(...central);
+    centralParts.push(0x50,0x4b,0x01,0x02, ...u16(20), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset), ...name);
     offset += local.length;
   });
   const centralOffset = offset;
@@ -485,9 +423,7 @@ function makeZip(files) {
 }
 
 function descargarTablaExcel(filename, headers, rows) {
-  const lastCol = xlsxColName(headers.length);
-  const lastRow = rows.length + 1;
-  const ref = `A1:${lastCol}${lastRow}`;
+  const lastCol = xlsxColName(headers.length), lastRow = rows.length + 1, ref = `A1:${lastCol}${lastRow}`;
   const anchos = [30, 14, 13, 16, 20, 18, 16, 10, 12, 13, 9];
   const colsXml = anchos.slice(0, headers.length).map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('');
   const all = [headers, ...rows];
@@ -514,16 +450,14 @@ function descargarTablaExcel(filename, headers, rows) {
 
 function horaAMinutos(v) {
   const m = String(v || '').trim().match(/^(\d{1,2}):(\d{2})/);
-  if (!m) return Number.POSITIVE_INFINITY;
-  return (parseInt(m[1], 10) * 60) + parseInt(m[2], 10);
+  return m ? (parseInt(m[1], 10) * 60) + parseInt(m[2], 10) : Number.POSITIVE_INFINITY;
 }
 
 function fechasProgramadasEnUso() {
   const counts = new Map();
   DB.rows.forEach(p => {
     const f = String(p.fechaCir || '').slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return;
-    counts.set(f, (counts.get(f) || 0) + 1);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(f)) counts.set(f, (counts.get(f) || 0) + 1);
   });
   return Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]));
 }
@@ -533,27 +467,14 @@ function descargarCirugiasProgramadas(fecha) {
     .filter(p => String(p.fechaCir || '').slice(0, 10) === fecha)
     .sort((a, b) => horaAMinutos(a.hora || a.hora_cirugia) - horaAMinutos(b.hora || b.hora_cirugia)
       || String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es'));
-
-  if (!rowsProgramadas.length) {
-    toast(`No hay cirugías programadas para ${fd(fecha) || fecha}`);
-    return false;
-  }
+  if (!rowsProgramadas.length) { toast(`No hay cirugías programadas para ${fd(fecha) || fecha}`); return false; }
 
   const headers = ['nombre', 'dni', 'fnac', 'tel', 'obraSocial', 'afiliado', 'clinica', 'ojo', 'dioptria', 'fecha Cir', 'hora'];
   const rows = rowsProgramadas.map(p => [
-    p.nombre || '',
-    p.dni || '',
-    String(p.fnac || '').slice(0, 10),
-    p.tel || '',
-    p.obraSocial || '',
-    p.afiliado || '',
-    p.clinica || '',
-    normalizarOjo(p.ojo || ''),
-    dioptriaActual(p),
-    String(p.fechaCir || '').slice(0, 10),
-    p.hora || p.hora_cirugia || ''
+    p.nombre || '', p.dni || '', String(p.fnac || '').slice(0, 10), p.tel || '', p.obraSocial || '',
+    p.afiliado || '', p.clinica || '', normalizarOjo(p.ojo || ''), dioptriaActual(p),
+    String(p.fechaCir || '').slice(0, 10), p.hora || p.hora_cirugia || ''
   ]);
-
   descargarTablaExcel(`cirugias_programadas_${fecha}.xlsx`, headers, rows);
   toast(`✓ Descargadas ${rowsProgramadas.length} cirugías programadas del ${fd(fecha) || fecha}`);
   return true;
@@ -562,7 +483,6 @@ function descargarCirugiasProgramadas(fecha) {
 function asegurarModalCirugiasProgramadas() {
   let modal = document.getElementById('cirugiasProgramadasExportModal');
   if (modal) return modal;
-
   modal = document.createElement('div');
   modal.id = 'cirugiasProgramadasExportModal';
   modal.style.cssText = 'display:none;position:fixed;inset:0;background:#0006;z-index:700;align-items:center;justify-content:center;padding:18px';
@@ -584,14 +504,13 @@ function asegurarModalCirugiasProgramadas() {
       </div>
     </div>`;
   document.body.appendChild(modal);
-
   modal.addEventListener('click', e => {
     if (e.target === modal || e.target.closest('[data-close-programadas]')) modal.style.display = 'none';
   });
   modal.querySelector('#fechaProgramadasExport')?.addEventListener('change', e => {
     const option = e.target.selectedOptions?.[0];
     const info = modal.querySelector('#fechaProgramadasInfo');
-    if (info) info.textContent = option?.dataset.count ? `${option.dataset.count} cirugía(s) en esa fecha. El Excel se ordenará por hora de menor a mayor.` : '';
+    if (info) info.textContent = option?.dataset.count ? `${option.dataset.count} cirugía(s) en esa fecha. Se ordenará por hora de menor a mayor.` : '';
   });
   modal.querySelector('#btnConfirmarDescargaProgramadas')?.addEventListener('click', () => {
     const fecha = modal.querySelector('#fechaProgramadasExport')?.value || '';
@@ -603,10 +522,7 @@ function asegurarModalCirugiasProgramadas() {
 
 function abrirModalCirugiasProgramadas() {
   const fechas = fechasProgramadasEnUso();
-  if (!fechas.length) {
-    toast('No hay fechas de cirugía programadas para descargar');
-    return;
-  }
+  if (!fechas.length) { toast('No hay fechas de cirugía programadas para descargar'); return; }
   const modal = asegurarModalCirugiasProgramadas();
   const select = modal.querySelector('#fechaProgramadasExport');
   const today = hoyISO();
@@ -627,28 +543,23 @@ function abrirModalCirugiasProgramadas() {
 function instalarInterceptores() {
   if (window.__ajustesCirugiasInterceptores) return;
   window.__ajustesCirugiasInterceptores = true;
-
   document.addEventListener('click', e => {
     const exportDia = e.target.closest('#btnExportarDia');
     if (exportDia) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
+      e.preventDefault(); e.stopImmediatePropagation();
       exportDia.closest('details')?.removeAttribute('open');
       abrirModalCirugiasProgramadas();
       return;
     }
-
     const duplicar = e.target.closest('[data-qa-action="duplicar"]');
     if (duplicar) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
+      e.preventDefault(); e.stopImmediatePropagation();
       duplicarSegundoOjo(duplicar.dataset.qaId).catch(err => {
         console.error('[duplicar segundo ojo]', err);
         toast('No se pudo duplicar el segundo ojo.');
       });
     }
   }, true);
-
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
       const modal = document.getElementById('cirugiasProgramadasExportModal');
@@ -683,15 +594,13 @@ function iniciar() {
   const sideBody = document.getElementById('sideBody');
   if (sideBody && !sideBody.dataset.eyeFieldsObserver) {
     sideBody.dataset.eyeFieldsObserver = '1';
-    new MutationObserver(() => mejorarCamposOjos()).observe(sideBody, { childList: true });
+    new MutationObserver(mejorarCamposOjos).observe(sideBody, { childList: true });
   }
   mejorarCamposOjos();
 }
 
-// Se ejecuta antes de que el usuario inicie sesión y antes de restoreFilters().
 limpiarFiltrosPersistidosObsoletos();
 
-// Los módulos manejan sus fechas internamente. La fecha global solo corresponde a Operación.
 document.addEventListener('click', e => {
   const tab = e.target.closest('.tablink');
   if (!tab || (tab.dataset.tab || 'tabla') === 'tabla') return;
